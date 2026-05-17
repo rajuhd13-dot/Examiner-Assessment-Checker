@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <style>
+    /* Custom Animations & Overrides */
+    .slide-in { animation: slideIn 0.2s ease-out forwards; }
+    @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    .box-shadow-glow { box-shadow: 0 0 8px 2px rgba(52, 211, 153, 0.4); }
+    
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  </style>
+</head>
+
+<body class="bg-[#F8FAFC] text-slate-800 font-sans antialiased min-h-screen selection:bg-indigo-100 selection:text-indigo-900">
+
+  <!-- Top Navigation -->
+  <header class="bg-indigo-700 text-white sticky top-0 z-40 shadow-md">
+    <div class="max-w-[1600px] mx-auto px-6 py-3 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-4">
+        <div class="bg-white/10 p-2 rounded-lg backdrop-blur-sm border border-white/5">
+          <i data-lucide="file-spreadsheet" class="w-5 h-5 text-indigo-50"></i>
+        </div>
+        <h1 class="text-[1.1rem] font-semibold tracking-wide">Examiner Assessment Checker</h1>
+        <div class="hidden sm:flex items-center gap-2 bg-emerald-500/15 text-emerald-100 px-3 py-1 rounded-full text-xs font-medium border border-emerald-500/30">
+          <div id="liveDot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse box-shadow-glow"></div>
+          <span id="liveText">Loading...</span>
+        </div>
+      </div>
+      
+      <div class="flex items-center gap-4">
+        <div class="relative group">
+          <i data-lucide="search" class="w-4 h-4 text-indigo-300 absolute left-3 top-1/2 -translate-y-1/2 transition-colors"></i>
+          <input 
+            id="globalSearch"
+            type="text"
+            class="bg-indigo-800/60 border border-indigo-600/50 text-sm text-white placeholder-indigo-300 rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-indigo-800 transition-all w-64 md:w-80 shadow-inner"
+            placeholder="Global Search (T-Pin/Mobile)..."
+            autocomplete="off"
+            onkeydown="if(event.key==='Enter') globalSearchCall()"
+          />
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-[1600px] mx-auto px-6 py-8">
+    
+    <!-- Setup Status Banner -->
+    <div id="statusWrap" class="mb-6 bg-white p-6 rounded-2xl shadow-sm border border-slate-200 text-center text-slate-500 font-medium">
+      <i data-lucide="loader-2" class="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500"></i>
+      Initializing connection...
+    </div>
+
+    <div id="appInterface" style="display: none;">
+      <!-- Toolbar Controls -->
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between mb-6 gap-4">
+        <div class="flex items-center gap-3">
+          <button onclick="clearAll()" class="flex items-center gap-2 bg-white border border-slate-200 shadow-sm text-rose-600 px-3.5 py-2 rounded-xl text-sm font-semibold hover:bg-rose-50 hover:text-rose-700 transition-all hover:shadow">
+            <i data-lucide="x-circle" class="w-4 h-4"></i> Clear All
+          </button>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <div class="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-sm font-semibold border border-indigo-100 mr-2 flex items-center gap-2">
+            <i data-lucide="database" class="w-4 h-4"></i>
+            <span id="rowCountBadge">Rows in DB: ?</span>
+          </div>
+          <button onclick="addRows(5)" class="flex items-center gap-2 bg-white border border-indigo-200 text-indigo-600 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-indigo-50 transition-all shadow-sm">
+            <i data-lucide="plus" class="w-4 h-4"></i> Add 5 Rows
+          </button>
+          <button onclick="searchAllRows()" class="flex items-center gap-2 bg-indigo-600 text-white px-5 py-2 rounded-xl text-sm font-semibold hover:bg-indigo-700 hover:shadow-md transition-all shadow-sm">
+            <i data-lucide="refresh-cw" class="w-4 h-4"></i> Search Pending
+          </button>
+        </div>
+      </div>
+
+      <!-- Data Table -->
+      <div class="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col relative min-h-[500px]">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse whitespace-nowrap min-w-max">
+            <thead>
+              <tr id="theadRow" class="bg-slate-50/80 border-b border-slate-200">
+                <!-- JavaScript will populate headers here -->
+              </tr>
+            </thead>
+            <tbody id="tbody" class="divide-y divide-slate-100">
+              <!-- JavaScript will populate rows here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+  
+  <!-- Toasts -->
+  <div id="toastBox" class="fixed bottom-6 right-6 z-50 text-white rounded-xl px-5 py-3 text-sm font-semibold shadow-lg shadow-indigo-900/20 slide-in" style="display: none;"></div>
+
+<script>
+  lucide.createIcons();
+
+  // --- Columns Config ---
+  const COLS = [
+    { key:'sl',           label:'SL',             w:'w-12', sticky: true },
+    { key:'entryTpin',    label:'Entry T-Pin',    w:'w-56', sticky: true },
+    { key:'name',         label:'Name',           w:'' },
+    { key:'tpin',         label:'T-Pin',          w:'' },
+    { key:'inst',         label:'Institution',    w:'' },
+    { key:'dept',         label:'Dept',           w:'' },
+    { key:'mobile',       label:'Mobile',         w:'' },
+    { key:'training',     label:'Training Report',w:'' },
+    { key:'english',      label:'English (%)',    scoreKey:'english', w:'', isScore: true },
+    { key:'bangla',       label:'Bangla (%)',     scoreKey:'bangla',  w:'', isScore: true },
+    { key:'physics',      label:'Physics (%)',    scoreKey:'physics', w:'', isScore: true },
+    { key:'chemistry',    label:'Chemistry (%)',  scoreKey:'chemistry', w:'', isScore: true },
+    { key:'math',         label:'Math (%)',       scoreKey:'math',    w:'', isScore: true },
+    { key:'biology',      label:'Biology (%)',    scoreKey:'biology', w:'', isScore: true },
+    { key:'ict',          label:'ICT (%)',        scoreKey:'ict',     w:'', isScore: true },
+  ];
+
+  // Store
+  const ROWS = new Map();
+  let rowId = 0;
+  
+  // Handled thresholds globally populated by initApp
+  let THRESHOLDS = { english: 55, bangla: 48, physics: 48, chemistry: 48, math: 48, biology: 48, ict: 48 };
+
+  // --- UI Helpers ---
+  function showToast(msg, isError = false) {
+    const t = document.getElementById('toastBox');
+    t.innerHTML = msg;
+    t.className = `fixed bottom-6 right-6 z-50 text-white rounded-xl px-5 py-3 text-sm font-semibold shadow-lg shadow-indigo-900/20 slide-in ${isError ? 'bg-rose-600' : 'bg-emerald-600'}`;
+    t.style.display = 'block';
+    if(t._timeout) clearTimeout(t._timeout);
+    t._timeout = setTimeout(() => { t.style.display = 'none'; }, 3000);
+  }
+
+  function setLive(text, isStale = false) {
+    document.getElementById('liveText').textContent = text;
+    const dot = document.getElementById('liveDot');
+    dot.className = `w-2 h-2 rounded-full ${isStale ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse box-shadow-glow'}`;
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, function(m) {
+      switch (m) {
+        case '&': return '&amp;'; case '<': return '&lt;'; case '>': return '&gt;';
+        case '"': return '&quot;'; case "'": return '&#039;'; default: return m;
+      }
+    });
+  }
+
+  // --- Table Building ---
+  function buildHeader() {
+    const tr = document.getElementById('theadRow');
+    let html = '';
+    COLS.forEach(col => {
+      let stickyClasses = col.sticky 
+        ? (col.key === 'sl' ? 'sticky left-0 z-20 shadow-[1px_0_0_0_#f1f5f9]' : 'sticky left-12 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]')
+        : '';
+        
+      html += `<th class="px-5 py-3.5 text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider ${col.w} ${stickyClasses} bg-slate-50/90 backdrop-blur border-r border-slate-100">${col.label}${col.isScore? '<div class="absolute top-0 right-0 w-full h-[2px] bg-indigo-100/50"></div>':''}</th>`;
+    });
+    tr.innerHTML = html;
+  }
+
+  function makeRowHTML(id, index) {
+    let tr = document.createElement('tr');
+    tr.dataset.rid = id;
+    tr.className = "group hover:bg-indigo-50/40 transition-colors";
+    
+    let html = '';
+    COLS.forEach(col => {
+      let stickyClasses = col.sticky 
+        ? (col.key === 'sl' ? 'sticky left-0 z-10 bg-white group-hover:bg-indigo-50/40' : 'sticky left-12 z-10 bg-white group-hover:bg-indigo-50/40 border-r border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.02)]')
+        : '';
+        
+      let tdBorder = col.sticky ? '' : 'border-r border-slate-50';
+        
+      html += `<td data-col="${col.key}" class="px-5 py-2.5 ${stickyClasses} ${tdBorder} align-middle">${col.key === 'sl' ? `<span class="text-sm font-medium text-slate-400 text-center block">${index + 1}</span>` : (col.key === 'entryTpin' ? getEntryHTML(id) : '<span class="text-slate-300">—</span>')}</td>`;
+    });
+    tr.innerHTML = html;
+    
+    // Bind enter key
+    setTimeout(() => {
+      const input = tr.querySelector(`input[data-rid="${id}"]`);
+      if(input) {
+        ROWS.get(id).inputEl = input;
+        input.addEventListener('keydown', e => { if(e.key === 'Enter') lookupRow(id); });
+      }
+    }, 0);
+    
+    return tr;
+  }
+
+  function getEntryHTML(id) {
+    return `
+      <div class="relative flex items-center">
+        <input type="text" data-rid="${id}" placeholder="Enter to search..." autocomplete="off"
+          class="w-full text-sm font-medium rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 transition-all bg-slate-50 border border-slate-200 text-slate-700 focus:bg-white focus:ring-indigo-500/50 focus:border-indigo-400" />
+      </div>`;
+  }
+
+  function addRows(count) {
+    const tbody = document.getElementById('tbody');
+    let startIdx = ROWS.size;
+    for (let i = 0; i < count; i++) {
+      const id = rowId++;
+      ROWS.set(id, { data: null, inputEl: null });
+      tbody.appendChild(makeRowHTML(id, startIdx + i));
+    }
+  }
+
+  // --- Row Update ---
+  function setRowState(id, stateClass, valHtml = null) {
+    const row = ROWS.get(id);
+    if(!row || !row.inputEl) return;
+    
+    row.inputEl.className = `w-full text-sm font-medium rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 transition-all ${stateClass}`;
+    
+    if(valHtml !== null) {
+      const tr = document.querySelector(`tr[data-rid="${id}"]`);
+      if(tr) {
+        tr.querySelectorAll('td[data-col]').forEach(td => {
+          let key = td.dataset.col;
+          if(key !== 'sl' && key !== 'entryTpin') {
+            td.innerHTML = valHtml;
+          }
+        });
+      }
+    }
+  }
+
+  function renderDataToRow(id, data) {
+    const tr = document.querySelector(`tr[data-rid="${id}"]`);
+    if(!tr) return;
+    
+    tr.querySelectorAll('td[data-col]').forEach(td => {
+      let key = td.dataset.col;
+      if (key === 'sl' || key === 'entryTpin') return;
+      
+      let val = data[key];
+      // Due to Apps Script exact mapping, scores are embedded in objects or accessed flatly depending on the Code.gs output
+      
+      let scoreObj = (val && typeof val === 'object' && val.score !== undefined) ? val : null;
+      let scoreText = scoreObj ? scoreObj.score : val;
+      let isAllowed = scoreObj ? scoreObj.allowed : false;
+
+      let isScoreCol = COLS.find(c => c.key === key)?.isScore;
+
+      if (isScoreCol) {
+        // Score rendering
+        if(scoreText === '' || scoreText === undefined) {
+           td.innerHTML = '<span class="text-slate-400">—</span>';
+        } else if (isAllowed) {
+           td.innerHTML = `<div class="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-md border border-emerald-200/50"><span class="font-bold text-[13px]">${scoreText}</span></div>`;
+        } else {
+           td.innerHTML = `<div class="inline-flex items-center gap-1.5 bg-rose-50 text-rose-700 px-2.5 py-0.5 rounded-md border border-rose-200/50"><span class="font-bold text-[13px]">${scoreText}</span></div>`;
+        }
+      } else {
+        // Text rendering
+        if(key === 'training' && scoreText) {
+          td.innerHTML = `<span class="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-xs font-semibold border border-blue-200">${escapeHtml(scoreText)}</span>`;
+        } else {
+          td.innerHTML = `<span class="text-slate-700 text-sm font-medium">${escapeHtml(scoreText || '-')}</span>`;
+        }
+      }
+    });
+  }
+
+  // --- API Calls ---
+  function lookupRow(id) {
+    const row = ROWS.get(id);
+    if (!row || !row.inputEl) return;
+    const query = row.inputEl.value.trim();
+    if (!query) return;
+
+    setRowState(id, "bg-amber-50 border border-amber-300 text-amber-800", '<div class="h-4 w-12 bg-slate-100 rounded animate-pulse"></div>');
+    
+    // Check if google is available
+    if (typeof google === 'undefined') {
+       setTimeout(() => {
+          setRowState(id, "bg-rose-50 border border-rose-300 text-rose-800", '<span class="text-slate-300">—</span>');
+          showToast('Not connected to Google Apps Script', true);
+       }, 500);
+       return;
+    }
+
+    google.script.run
+      .withSuccessHandler(res => {
+        if(res && res.success && res.found) {
+           row.data = res.data;
+           setRowState(id, "bg-emerald-50 border border-emerald-400 text-emerald-800 shadow-[0_0_0_2px_rgba(52,211,153,0.2)]");
+           renderDataToRow(id, res.data);
+           showToast('Found: ' + escapeHtml(res.data.name));
+        } else {
+           row.data = null;
+           setRowState(id, "bg-rose-50 border border-rose-300 text-rose-800", '<span class="text-slate-300">—</span>');
+           showToast('Not found: ' + escapeHtml(query), true);
+        }
+      })
+      .withFailureHandler(err => {
+        setRowState(id, "bg-rose-50 border border-rose-300 text-rose-800", '<span class="text-slate-300">—</span>');
+        showToast('Error: ' + err.message, true);
+      })
+      .lookupExaminerByTPin(query);
+  }
+
+  function globalSearchCall() {
+    let q = document.getElementById('globalSearch').value.trim();
+    if(q) {
+       // Find an empty row
+       let targetId = null;
+       for (const [id, row] of ROWS) {
+         if (row.inputEl && !row.inputEl.value.trim() && !row.data) {
+           targetId = id; break;
+         }
+       }
+       if (targetId === null) {
+         addRows(1);
+         targetId = rowId - 1; // latest id
+       }
+       
+       let row = ROWS.get(targetId);
+       row.inputEl.value = q;
+       document.getElementById('globalSearch').value = '';
+       lookupRow(targetId);
+    }
+  }
+
+  function searchAllRows() {
+    let count = 0;
+    for (const [id, row] of ROWS) {
+      if (row.inputEl && row.inputEl.value.trim() && !row.data) {
+        lookupRow(id);
+        count++;
+      }
+    }
+    if(count > 0) showToast(`Searching ${count} entries...`);
+  }
+
+  function clearAll() {
+    for (const [id, row] of ROWS) {
+      if (row.inputEl) row.inputEl.value = '';
+      row.data = null;
+      setRowState(id, "bg-slate-50 border border-slate-200 text-slate-700 focus:bg-white focus:ring-indigo-500/50 focus:border-indigo-400", '<span class="text-slate-300">—</span>');
+    }
+  }
+
+  // --- Boot App ---
+  function initApp(res) {
+    document.getElementById('statusWrap').style.display = 'none';
+    document.getElementById('appInterface').style.display = 'block';
+    
+    if (res && res.success) {
+      if (res.allow) Object.assign(THRESHOLDS, res.allow);
+      document.getElementById('rowCountBadge').textContent = `Database: ${res.rowCount || 0} Records`;
+    }
+    
+    buildHeader();
+    addRows(7); // default 7 rows
+    setLive('Live System Active');
+  }
+
+  // Check if we are inside Google Apps Script iframe
+  if (typeof google !== 'undefined' && google.script && google.script.run) {
+    google.script.run
+      .withSuccessHandler(initApp)
+      .withFailureHandler(e => {
+        document.getElementById('statusWrap').innerHTML = `<i data-lucide="alert-triangle" class="w-6 h-6 mx-auto mb-2 text-rose-500"></i><span class="text-rose-600">${e.message}</span>`;
+        lucide.createIcons();
+      })
+      .getFilterOptionsFast();
+  } else {
+    // Failsafe for normal browser preview
+    setTimeout(() => { initApp({ success: true, rowCount: 1205 }); }, 1000);
+  }
+
+</script>
+</body>
+</html>
