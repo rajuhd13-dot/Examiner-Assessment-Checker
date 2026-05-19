@@ -22,7 +22,7 @@ declare global {
 
 // --- Types ---
 type SubjectStats = {
-  score: number | '';
+  score: string;
   allowed: boolean;
 };
 
@@ -360,9 +360,14 @@ export default function App() {
 
         if (rowData) {
           const r = rowData;
-          const pctValue = (v: any) => {
-            const n = parseFloat(v);
-            return Number.isFinite(n) ? n : '';
+          const parseScore = (v: any, threshold: number): SubjectStats => {
+            const raw = String(v || '').trim();
+            if (!raw || raw === '—') return { score: '', allowed: false };
+            const firstNum = parseFloat(raw);
+            return {
+              score: raw,
+              allowed: Number.isFinite(firstNum) && firstNum >= threshold
+            };
           };
 
           const extractNum = (v: any) => {
@@ -393,13 +398,13 @@ export default function App() {
             hscBoard: String(r[30] || '').trim(),
             subjectsChoice: [r[34], r[35], r[36], r[37], r[38]].filter(Boolean).join(', '),
             runningProgram: String(r[16] || '').trim(),
-            english: { score: pctValue(r[61]), allowed: pctValue(r[61]) >= (thresholds.english || THRESHOLDS.english) },
-            bangla: { score: pctValue(r[64]), allowed: pctValue(r[64]) >= (thresholds.bangla || THRESHOLDS.bangla) },
-            physics: { score: pctValue(r[67]), allowed: pctValue(r[67]) >= (thresholds.physics || THRESHOLDS.physics) }, 
-            chemistry: { score: pctValue(r[70]), allowed: pctValue(r[70]) >= (thresholds.chemistry || THRESHOLDS.chemistry) },
-            math: { score: pctValue(r[73]), allowed: pctValue(r[73]) >= (thresholds.math || THRESHOLDS.math) },
-            biology: { score: pctValue(r[76]), allowed: pctValue(r[76]) >= (thresholds.biology || THRESHOLDS.biology) },
-            ict: { score: pctValue(r[79]), allowed: pctValue(r[79]) >= (thresholds.ict || THRESHOLDS.ict) },
+            english: parseScore(r[61], thresholds.english || THRESHOLDS.english),
+            bangla: parseScore(r[64], thresholds.bangla || THRESHOLDS.bangla),
+            physics: parseScore(r[67], thresholds.physics || THRESHOLDS.physics), 
+            chemistry: parseScore(r[70], thresholds.chemistry || THRESHOLDS.chemistry),
+            math: parseScore(r[73], thresholds.math || THRESHOLDS.math),
+            biology: parseScore(r[76], thresholds.biology || THRESHOLDS.biology),
+            ict: parseScore(r[79], thresholds.ict || THRESHOLDS.ict),
             training: String(r[82] || '').trim(),
             trainingDate: String(r[83] || '').trim(),
             campus: String(r[88] || '').trim(),
