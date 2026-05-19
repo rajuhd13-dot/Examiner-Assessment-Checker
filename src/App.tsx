@@ -111,7 +111,8 @@ const ALL_COLS: ColDef[] = [
 const DEFAULT_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyesBP9GFM2tcfDdr_eBUGhUA-lLxF-9jSUHN4xpngdKyLb2vaeRJ9SbmxgiY5Zg-0-jg/exec';
 
 const getScriptUrl = () => {
-  return localStorage.getItem('examiner_script_url') || DEFAULT_SCRIPT_URL;
+  const url = localStorage.getItem('examiner_script_url') || DEFAULT_SCRIPT_URL;
+  return url.trim();
 };
 
 const lookupExaminer = async (query: string): Promise<{ success: boolean; found: boolean; data?: Examiner; error?: string }> => {
@@ -131,7 +132,7 @@ const lookupExaminer = async (query: string): Promise<{ success: boolean; found:
   try {
     const separator = scriptBaseUrl.includes('?') ? '&' : '?';
     const url = `${scriptBaseUrl}${separator}action=lookup&query=${encodeURIComponent(query)}&_t=${Date.now()}`;
-    const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    const response = await fetch(url);
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -207,6 +208,20 @@ export default function App() {
     return s;
   };
 
+  const parseScore = (v: any, threshold: number): SubjectStats => {
+    const raw = String(v || '').trim();
+    if (!raw || raw === '—') return { score: '', allowed: false };
+    
+    // Handle multiple scores like "53/67" or "50/40"
+    const scores = raw.split('/').map(s => parseFloat(s.trim()));
+    const isAllowed = scores.some(s => Number.isFinite(s) && s >= threshold);
+    
+    return {
+      score: raw,
+      allowed: isAllowed
+    };
+  };
+
   const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
     ALL_COLS.forEach(c => initial[c.key] = c.defaultVisible);
@@ -235,7 +250,6 @@ export default function App() {
       
       const res = await fetch(syncUrl, { 
         method: 'GET',
-        headers: { 'Accept': 'application/json' },
         cache: 'no-store'
       });
 
@@ -360,15 +374,7 @@ export default function App() {
 
         if (rowData) {
           const r = rowData;
-          const parseScore = (v: any, threshold: number): SubjectStats => {
-            const raw = String(v || '').trim();
-            if (!raw || raw === '—') return { score: '', allowed: false };
-            const firstNum = parseFloat(raw);
-            return {
-              score: raw,
-              allowed: Number.isFinite(firstNum) && firstNum >= threshold
-            };
-          };
+          const curThresholds = thresholds || THRESHOLDS;
 
           const extractNum = (v: any) => {
             const m = String(v || '').match(/\d+/);
@@ -398,13 +404,13 @@ export default function App() {
             hscBoard: String(r[30] || '').trim(),
             subjectsChoice: [r[34], r[35], r[36], r[37], r[38]].filter(Boolean).join(', '),
             runningProgram: String(r[16] || '').trim(),
-            english: parseScore(r[61], thresholds.english || THRESHOLDS.english),
-            bangla: parseScore(r[64], thresholds.bangla || THRESHOLDS.bangla),
-            physics: parseScore(r[67], thresholds.physics || THRESHOLDS.physics), 
-            chemistry: parseScore(r[70], thresholds.chemistry || THRESHOLDS.chemistry),
-            math: parseScore(r[73], thresholds.math || THRESHOLDS.math),
-            biology: parseScore(r[76], thresholds.biology || THRESHOLDS.biology),
-            ict: parseScore(r[79], thresholds.ict || THRESHOLDS.ict),
+            english: parseScore(r[61], curThresholds.english || THRESHOLDS.english),
+            bangla: parseScore(r[64], curThresholds.bangla || THRESHOLDS.bangla),
+            physics: parseScore(r[67], curThresholds.physics || THRESHOLDS.physics), 
+            chemistry: parseScore(r[70], curThresholds.chemistry || THRESHOLDS.chemistry),
+            math: parseScore(r[73], curThresholds.math || THRESHOLDS.math),
+            biology: parseScore(r[76], curThresholds.biology || THRESHOLDS.biology),
+            ict: parseScore(r[79], curThresholds.ict || THRESHOLDS.ict),
             training: String(r[82] || '').trim(),
             trainingDate: String(r[83] || '').trim(),
             campus: String(r[88] || '').trim(),
@@ -425,6 +431,18 @@ export default function App() {
           ...res.data,
           trainingDate: (res.data as any).trainDate || (res.data as any).trainingDate || ''
         } as Examiner;
+
+        // Re-apply score thresholds logic in frontend to handle multi-scores like "53/67"
+        const curThresholds = thresholds || THRESHOLDS;
+        const getS = (obj: any) => (typeof obj === 'object' && obj !== null) ? obj.score : obj;
+        
+        mappedData.english = parseScore(getS(mappedData.english), curThresholds.english || THRESHOLDS.english);
+        mappedData.bangla = parseScore(getS(mappedData.bangla), curThresholds.bangla || THRESHOLDS.bangla);
+        mappedData.physics = parseScore(getS(mappedData.physics), curThresholds.physics || THRESHOLDS.physics);
+        mappedData.chemistry = parseScore(getS(mappedData.chemistry), curThresholds.chemistry || THRESHOLDS.chemistry);
+        mappedData.math = parseScore(getS(mappedData.math), curThresholds.math || THRESHOLDS.math);
+        mappedData.biology = parseScore(getS(mappedData.biology), curThresholds.biology || THRESHOLDS.biology);
+        mappedData.ict = parseScore(getS(mappedData.ict), curThresholds.ict || THRESHOLDS.ict);
         
         setRows(prev => prev.map(r => r.id === id ? { ...r, status: 'found', data: mappedData } : r));
       } else {
