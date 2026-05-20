@@ -129,7 +129,22 @@ const lookupExaminer = async (query: string): Promise<{ success: boolean; found:
     });
   }
 
-  // If running externally (React Dev Server or API call)
+  // 1. Try DIRECT API fetch from client browser first (Faster & bypasses any server-side proxy sandboxed timeouts)
+  try {
+    const separator = scriptBaseUrl.includes('?') ? '&' : '?';
+    const directUrl = `${scriptBaseUrl.trim()}${separator}action=lookup&query=${encodeURIComponent(query)}&_t=${Date.now()}`;
+    const directRes = await fetch(directUrl);
+    if (directRes.ok) {
+      const data = await directRes.json();
+      if (data && data.success) {
+        return data; // Return direct result if successful
+      }
+    }
+  } catch (directErr) {
+    console.warn("Direct browser lookup failed or blocked by CORS, falling back to server proxy...", directErr);
+  }
+
+  // 2. Fallback to Server Proxy (React Dev Server or API call)
   try {
     const url = `/api/lookup?scriptUrl=${encodeURIComponent(scriptBaseUrl)}&query=${encodeURIComponent(query)}&_t=${Date.now()}`;
     const response = await fetch(url);
@@ -192,7 +207,8 @@ export default function App() {
 
   // Helper to normalize strings for search (Adopted from user snippet)
   const norm = (v: any) => {
-    let s = String(v || '').trim();
+    // Strip trailing .0 from potential Excel Float formatting before anything else
+    let s = String(v || '').trim().replace(/\.0$/, '');
     if (!s) return '';
     // If it looks like a phone number, normalize phone formatting
     if (/^[\d+]+$/.test(s.replace(/[-\s]/g, '')) && s.length >= 10) {
@@ -257,20 +273,44 @@ export default function App() {
       setIsSyncing(true);
     }
     
+    let res;
+    let data;
+    let serverSuccess = false;
+
     try {
       // Fetch through our local full-stack cache proxy server to get instant caching on any device and bypass CORS
       const endpoint = forceSync ? '/api/sync' : '/api/data';
       const requestUrl = `${endpoint}?scriptUrl=${encodeURIComponent(scriptBaseUrl)}&_t=${Date.now()}`;
       
-      const res = await fetch(requestUrl, { 
+      res = await fetch(requestUrl, { 
         method: 'GET',
         cache: 'no-store'
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      
-      const data = await res.json();
-      
+      if (res.ok) {
+        data = await res.json();
+        if (data && data.success) {
+          serverSuccess = true;
+        }
+      }
+    } catch (err) {
+      console.warn("Server-side proxy fetch failed, trying direct browser fetch...", err);
+    }
+
+    try {
+      if (!serverSuccess) {
+        console.log("Attempting direct client-side fetch from Google Apps Script Web App directly...");
+        const separator = scriptBaseUrl.includes('?') ? '&' : '?';
+        const directUrl = `${scriptBaseUrl.trim()}${separator}action=filterOptions&_t=${Date.now()}`;
+        
+        const directRes = await fetch(directUrl, { method: 'GET' });
+        if (!directRes.ok) throw new Error(`HTTP ${directRes.status} on direct fetch`);
+        data = await directRes.json();
+        if (!data || !data.success) {
+          throw new Error(data?.error || "Direct script reported sync failure");
+        }
+      }
+
       if (data.success) {
         setConnectionStatus('connected');
         if (targetUrl) localStorage.setItem('examiner_script_url', targetUrl.trim());
