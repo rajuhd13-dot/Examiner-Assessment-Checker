@@ -504,38 +504,34 @@ export default function App() {
       return;
     }
     
-    // Map data to Excel format
-    const dataToExport = dataRows.map(r => {
+    // Map data to Excel format using ONLY the currently visible table columns
+    const dataToExport = dataRows.map((r, index) => {
       const d = r.data!;
-      return {
-        'SL': d.sl,
-        'Nick Name': d.name,
-        'T-Pin': d.tpin,
-        'Institute': d.inst,
-        'Department': d.dept,
-        'HSC Batch': d.batch,
-        'RM': d.rm,
-        'Remarked By': d.remarkedBy,
-        'Mobile 1': d.mobile,
-        'Alternate': d.alternate,
-        'Nagad Number': d.nagad,
-        'English(%)': d.english.score,
-        'Bangla(%)': d.bangla.score,
-        'Physics(%)': d.physics.score,
-        'Chemistry(%)': d.chemistry.score,
-        'Math(%)': d.math.score,
-        'Biology(%)': d.biology.score,
-        'ICT(%)': d.ict.score,
-        'Campus': d.campus,
-        'Home District': d.homeDistrict,
-        'HSC Board': d.hscBoard,
-        'Email': d.email,
-        'Subjects Choice': d.subjectsChoice,
-        'Running Program': d.runningProgram,
-        'Training Status': d.training,
-        'Training Date': d.trainingDate,
-        'Remark': d.remark.body
-      };
+      const obj: Record<string, any> = {};
+
+      // 1. Entry T-Pin / Mobile
+      obj['Entry T-Pin / Mobile'] = r.inputValue;
+
+      // 2. SL (if visible index)
+      if (visibleCols.sl) {
+        obj['SL'] = index + 1;
+      }
+
+      // 3. Other visible columns from ALL_COLS
+      ALL_COLS.forEach(col => {
+        if (col.key === 'sl' || col.key === 'entry' || col.key === 'action') return;
+        if (visibleCols[col.key]) {
+          const val = d[col.key as keyof Examiner];
+          if (col.isScore) {
+            const stats = val as SubjectStats;
+            obj[col.label] = stats ? stats.score : '';
+          } else {
+            obj[col.label] = val;
+          }
+        }
+      });
+
+      return obj;
     });
 
     try {
@@ -543,9 +539,17 @@ export default function App() {
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "Examiners");
       
-      // Auto-size columns (optional but nice)
-      const max_width = dataToExport.reduce((w, r: any) => Math.max(w, ...Object.values(r).map((v: any) => String(v).length)), 10);
-      worksheet["!cols"] = Object.keys(dataToExport[0]).map(() => ({ wch: Math.min(max_width, 50) }));
+      // Auto-size columns dynamically based on content length
+      if (dataToExport.length > 0) {
+        const firstRow = dataToExport[0];
+        worksheet["!cols"] = Object.keys(firstRow).map(key => {
+          const max_len = Math.max(
+            key.length,
+            ...dataToExport.map(r => String(r[key] || '').length)
+          );
+          return { wch: Math.min(Math.max(max_len + 2, 11), 50) };
+        });
+      }
 
       XLSX.writeFile(workbook, `Examiner_Results_${new Date().toLocaleDateString()}.xlsx`);
     } catch (err) {
