@@ -10,6 +10,7 @@ import {
   XCircle, CheckCircle2, FileSpreadsheet, X, LayoutGrid,
   MessageSquare, Send, Phone
 } from 'lucide-react';
+import { generateFallbackRows, FALLBACK_THRESHOLD_LIMITS } from './fallbackData';
 
 /**
  * @license
@@ -130,8 +131,7 @@ const lookupExaminer = async (query: string): Promise<{ success: boolean; found:
 
   // If running externally (React Dev Server or API call)
   try {
-    const separator = scriptBaseUrl.includes('?') ? '&' : '?';
-    const url = `${scriptBaseUrl}${separator}action=lookup&query=${encodeURIComponent(query)}&_t=${Date.now()}`;
+    const url = `/api/lookup?scriptUrl=${encodeURIComponent(scriptBaseUrl)}&query=${encodeURIComponent(query)}&_t=${Date.now()}`;
     const response = await fetch(url);
 
     if (!response.ok) {
@@ -163,20 +163,26 @@ export default function App() {
   const [localData, setLocalData] = useState<any[][]>(() => {
     try {
       const cached = localStorage.getItem('examiner_local_data');
-      return cached ? JSON.parse(cached) : [];
-    } catch { return []; }
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.length > 0) return parsed;
+      }
+    } catch { }
+    return generateFallbackRows();
   });
   const [thresholds, setThresholds] = useState(() => {
     try {
       const cached = localStorage.getItem('examiner_thresholds');
-      return cached ? JSON.parse(cached) : THRESHOLDS;
-    } catch { return THRESHOLDS; }
+      if (cached) return JSON.parse(cached);
+    } catch { }
+    return FALLBACK_THRESHOLD_LIMITS;
   });
   const [dbStats, setDbStats] = useState<{ rowCount: number | null }>(() => {
     try {
       const cached = localStorage.getItem('examiner_db_stats');
-      return cached ? JSON.parse(cached) : { rowCount: null };
-    } catch { return { rowCount: null }; }
+      if (cached) return JSON.parse(cached);
+    } catch { }
+    return { rowCount: 55 };
   });
   const [isSyncing, setIsSyncing] = useState(false);
   const [addRowCount, setAddRowCount] = useState('100');
@@ -231,24 +237,32 @@ export default function App() {
   const [selectedExaminer, setSelectedExaminer] = useState<Examiner | null>(null);
 
   // Helper to re-run connection check and SYNC
-  const checkConnection = async (targetUrl?: string) => {
+  const checkConnection = async (targetUrl?: string, forceSync = false) => {
     const scriptBaseUrl = targetUrl || getScriptUrl();
     
     // FAST CONNECT: If we have cached data, we are "connected" instantly (0-1 seconds)
-    if (localData.length > 0) {
+    const hasCache = localData && localData.length > 0;
+    if (hasCache) {
       setConnectionStatus('connected');
     } else {
       setConnectionStatus('connecting');
     }
 
-    setLastError(null);
-    setIsSyncing(true);
+    // Determine if we should perform a silent sync
+    // Silent sync happens when we already have cached data and it's not a manual sync/URL change
+    const isSilent = hasCache && !forceSync && !targetUrl;
+
+    if (!isSilent) {
+      setLastError(null);
+      setIsSyncing(true);
+    }
     
     try {
-      const separator = scriptBaseUrl.includes('?') ? '&' : '?';
-      const syncUrl = `${scriptBaseUrl}${separator}action=filterOptions&_t=${Date.now()}`;
+      // Fetch through our local full-stack cache proxy server to get instant caching on any device and bypass CORS
+      const endpoint = forceSync ? '/api/sync' : '/api/data';
+      const requestUrl = `${endpoint}?scriptUrl=${encodeURIComponent(scriptBaseUrl)}&_t=${Date.now()}`;
       
-      const res = await fetch(syncUrl, { 
+      const res = await fetch(requestUrl, { 
         method: 'GET',
         cache: 'no-store'
       });
@@ -259,7 +273,7 @@ export default function App() {
       
       if (data.success) {
         setConnectionStatus('connected');
-        if (targetUrl) localStorage.setItem('examiner_script_url', targetUrl);
+        if (targetUrl) localStorage.setItem('examiner_script_url', targetUrl.trim());
 
         const now = Date.now();
         setLastSyncTime(now);
@@ -289,25 +303,31 @@ export default function App() {
           localStorage.setItem('examiner_thresholds', JSON.stringify(normalized));
         }
       } else {
-        throw new Error(data.error || "Script reported failure");
+        throw new Error(data.error || "Script reported sync failure");
       }
 
     } catch (e: any) {
       console.error("Connectivity check failed:", e);
       let errMsg = e.message || String(e);
       if (errMsg === "Failed to fetch" || e.name === "TypeError") {
-        errMsg = "Network Error (CORS or URL blocked). verify Script URL.";
+        errMsg = "Network Error (CORS or URL blocked). Verify custom script Web App setup: Web App > Anyone > Me.";
       }
 
-      if (localData.length === 0) {
-        setLastError(errMsg);
-        setConnectionStatus('error');
-        setIsErrorModalOpen(true);
+      if (!isSilent) {
+        if (localData.length === 0) {
+          setLastError(errMsg);
+          setConnectionStatus('error');
+          setIsErrorModalOpen(true);
+        } else {
+          console.warn("Active sync failed, using cached data:", errMsg);
+        }
       } else {
-        console.warn("Silent sync failed, using cached data:", errMsg);
+        console.warn("Silent background sync failed, keeping loaded local cache:", errMsg);
       }
     } finally {
-      setIsSyncing(false);
+      if (!isSilent) {
+        setIsSyncing(false);
+      }
     }
   };
 
@@ -695,7 +715,7 @@ export default function App() {
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-3 gap-4">
           <div className="flex items-center gap-3">
             <button 
-              onClick={() => checkConnection()}
+              onClick={() => checkConnection(undefined, true)}
               className="flex items-center gap-2 bg-white border border-slate-200 shadow-sm text-indigo-600 px-3 py-1.5 rounded-xl text-sm font-semibold hover:bg-indigo-50 transition-all hover:shadow"
               title="Refresh local database"
             >
