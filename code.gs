@@ -53,7 +53,7 @@ function doGet(e) {
 
   if (action === 'lookup') {
     result = lookupByQuery(query);
-  } else if (action === 'filterOptions') {
+  } else if (action === 'filterOptions' || action === 'sync') {
     result = getAllDataForSync();
   } else if (action === 'ping') {
     result = { success: true, pong: true, time: new Date().toISOString() };

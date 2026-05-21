@@ -10,7 +10,6 @@ import {
   XCircle, CheckCircle2, FileSpreadsheet, X, LayoutGrid,
   MessageSquare, Send, Phone
 } from 'lucide-react';
-import { generateFallbackRows, FALLBACK_THRESHOLD_LIMITS } from './fallbackData';
 
 /**
  * @license
@@ -129,24 +128,10 @@ const lookupExaminer = async (query: string): Promise<{ success: boolean; found:
     });
   }
 
-  // 1. Try DIRECT API fetch from client browser first (Faster & bypasses any server-side proxy sandboxed timeouts)
+  // If running externally (React Dev Server or API call)
   try {
     const separator = scriptBaseUrl.includes('?') ? '&' : '?';
-    const directUrl = `${scriptBaseUrl.trim()}${separator}action=lookup&query=${encodeURIComponent(query)}&_t=${Date.now()}`;
-    const directRes = await fetch(directUrl);
-    if (directRes.ok) {
-      const data = await directRes.json();
-      if (data && data.success) {
-        return data; // Return direct result if successful
-      }
-    }
-  } catch (directErr) {
-    console.warn("Direct browser lookup failed or blocked by CORS, falling back to server proxy...", directErr);
-  }
-
-  // 2. Fallback to Server Proxy (React Dev Server or API call)
-  try {
-    const url = `/api/lookup?scriptUrl=${encodeURIComponent(scriptBaseUrl)}&query=${encodeURIComponent(query)}&_t=${Date.now()}`;
+    const url = `${scriptBaseUrl}${separator}action=lookup&query=${encodeURIComponent(query)}&_t=${Date.now()}`;
     const response = await fetch(url);
 
     if (!response.ok) {
@@ -178,26 +163,20 @@ export default function App() {
   const [localData, setLocalData] = useState<any[][]>(() => {
     try {
       const cached = localStorage.getItem('examiner_local_data');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed && parsed.length > 0) return parsed;
-      }
-    } catch { }
-    return generateFallbackRows();
+      return cached ? JSON.parse(cached) : [];
+    } catch { return []; }
   });
   const [thresholds, setThresholds] = useState(() => {
     try {
       const cached = localStorage.getItem('examiner_thresholds');
-      if (cached) return JSON.parse(cached);
-    } catch { }
-    return FALLBACK_THRESHOLD_LIMITS;
+      return cached ? JSON.parse(cached) : THRESHOLDS;
+    } catch { return THRESHOLDS; }
   });
   const [dbStats, setDbStats] = useState<{ rowCount: number | null }>(() => {
     try {
       const cached = localStorage.getItem('examiner_db_stats');
-      if (cached) return JSON.parse(cached);
-    } catch { }
-    return { rowCount: 55 };
+      return cached ? JSON.parse(cached) : { rowCount: null };
+    } catch { return { rowCount: null }; }
   });
   const [isSyncing, setIsSyncing] = useState(false);
   const [addRowCount, setAddRowCount] = useState('100');
@@ -207,8 +186,7 @@ export default function App() {
 
   // Helper to normalize strings for search (Adopted from user snippet)
   const norm = (v: any) => {
-    // Strip trailing .0 from potential Excel Float formatting before anything else
-    let s = String(v || '').trim().replace(/\.0$/, '');
+    let s = String(v || '').trim();
     if (!s) return '';
     // If it looks like a phone number, normalize phone formatting
     if (/^[\d+]+$/.test(s.replace(/[-\s]/g, '')) && s.length >= 10) {
@@ -253,83 +231,88 @@ export default function App() {
   const [selectedExaminer, setSelectedExaminer] = useState<Examiner | null>(null);
 
   // Helper to re-run connection check and SYNC
-  const checkConnection = async (targetUrl?: string, forceSync = false) => {
+  const checkConnection = async (targetUrl?: string, forceManual?: boolean) => {
     const scriptBaseUrl = targetUrl || getScriptUrl();
     
     // FAST CONNECT: If we have cached data, we are "connected" instantly (0-1 seconds)
-    const hasCache = localData && localData.length > 0;
-    if (hasCache) {
+    if (localData && localData.length > 0) {
       setConnectionStatus('connected');
     } else {
       setConnectionStatus('connecting');
     }
 
-    // Determine if we should perform a silent sync
-    // Silent sync happens when we already have cached data and it's not a manual sync/URL change
-    const isSilent = hasCache && !forceSync && !targetUrl;
-
-    if (!isSilent) {
-      setLastError(null);
-      setIsSyncing(true);
-    }
+    setLastError(null);
+    setIsSyncing(true);
     
-    let res;
-    let data;
-    let serverSuccess = false;
-
     try {
-      // Fetch through our local full-stack cache proxy server to get instant caching on any device and bypass CORS
-      const endpoint = forceSync ? '/api/sync' : '/api/data';
-      const requestUrl = `${endpoint}?scriptUrl=${encodeURIComponent(scriptBaseUrl)}&_t=${Date.now()}`;
+      const separator = scriptBaseUrl.includes('?') ? '&' : '?';
       
-      res = await fetch(requestUrl, { 
-        method: 'GET',
-        cache: 'no-store'
-      });
+      // Step 1: Try action=sync first (modern server sync)
+      const syncUrl = `${scriptBaseUrl}${separator}action=sync&_t=${Date.now()}`;
+      let data: any = null;
+      let syncAttemptSuccess = false;
 
-      if (res.ok) {
-        data = await res.json();
-        if (data && data.success) {
-          serverSuccess = true;
-        }
-      }
-    } catch (err) {
-      console.warn("Server-side proxy fetch failed, trying direct browser fetch...", err);
-    }
-
-    try {
-      if (!serverSuccess) {
-        console.log("Attempting direct client-side fetch from Google Apps Script Web App directly...");
-        const separator = scriptBaseUrl.includes('?') ? '&' : '?';
-        const directUrl = `${scriptBaseUrl.trim()}${separator}action=filterOptions&_t=${Date.now()}`;
+      try {
+        const res = await fetch(syncUrl);
         
-        const directRes = await fetch(directUrl, { method: 'GET' });
-        if (!directRes.ok) throw new Error(`HTTP ${directRes.status} on direct fetch`);
-        data = await directRes.json();
-        if (!data || !data.success) {
-          throw new Error(data?.error || "Direct script reported sync failure");
+        if (res.ok) {
+          const tempJson = await res.json();
+          const isTempSuccess = tempJson && (tempJson.success || tempJson.ok);
+          if (isTempSuccess) {
+            data = tempJson;
+            syncAttemptSuccess = true;
+          } else {
+            console.warn("action=sync returned inactive or error response:", tempJson);
+          }
         }
+      } catch (errSync) {
+        console.warn("action=sync fetch failed, falling back to legacy...", errSync);
       }
 
-      if (data.success) {
+      // Step 2: Fallback to action=filterOptions if action=sync was not successful or failed
+      if (!syncAttemptSuccess || !data) {
+        const fallbackUrl = `${scriptBaseUrl}${separator}action=filterOptions&_t=${Date.now()}`;
+        const fallbackRes = await fetch(fallbackUrl);
+        
+        if (!fallbackRes.ok) {
+          throw new Error(`HTTP ${fallbackRes.status}. Could not sync with spreadsheet.`);
+        }
+        
+        const fallbackJson = await fallbackRes.json();
+        const isFallbackSuccess = fallbackJson && (fallbackJson.success || fallbackJson.ok);
+        if (!isFallbackSuccess) {
+          throw new Error(fallbackJson?.error || fallbackJson?.message || "Legacy filterOptions returned failure");
+        }
+        data = fallbackJson;
+      }
+      
+      const isSuccess = data.success || data.ok;
+      
+      if (isSuccess) {
         setConnectionStatus('connected');
-        if (targetUrl) localStorage.setItem('examiner_script_url', targetUrl.trim());
+        if (targetUrl) localStorage.setItem('examiner_script_url', targetUrl);
 
         const now = Date.now();
         setLastSyncTime(now);
         localStorage.setItem('examiner_last_sync', String(now));
 
-        if (data.rows) {
-          setLocalData(data.rows);
+        // Rows can be returned as data.data (new sync) or data.rows (older sync)
+        const fetchedRows = data.data || data.rows;
+        if (fetchedRows && Array.isArray(fetchedRows) && fetchedRows.length > 0) {
+          setLocalData(fetchedRows);
           try {
-            localStorage.setItem('examiner_local_data', JSON.stringify(data.rows));
+            localStorage.setItem('examiner_local_data', JSON.stringify(fetchedRows));
           } catch (storageErr) {
-            console.warn("Storage quota exceeded, keeping in memory only.");
+            console.warn("Storage quota exceeded, keeping in browser memory. Clear other domain cache.");
           }
-        }
-        
-        if (data.rowCount) {
-          const stats = { rowCount: data.rowCount };
+          
+          const recordCount = fetchedRows.length;
+          const stats = { rowCount: recordCount };
+          setDbStats(stats);
+          localStorage.setItem('examiner_db_stats', JSON.stringify(stats));
+        } else if (data.rowCount) {
+          const recordCount = data.rowCount;
+          const stats = { rowCount: recordCount };
           setDbStats(stats);
           localStorage.setItem('examiner_db_stats', JSON.stringify(stats));
         }
@@ -342,32 +325,47 @@ export default function App() {
           setThresholds(normalized);
           localStorage.setItem('examiner_thresholds', JSON.stringify(normalized));
         }
+
+        if (forceManual) {
+          const count = fetchedRows ? fetchedRows.length : (data.rowCount || 0);
+          alert(`Successfully synchronized ${count.toLocaleString()} examiners! Saved to browser cache.`);
+        }
       } else {
-        throw new Error(data.error || "Script reported sync failure");
+        throw new Error(data.error || data.message || "Script reported failure during sync");
       }
 
     } catch (e: any) {
-      console.error("Connectivity check failed:", e);
+      console.error("Connectivity check and Sync failed:", e);
       let errMsg = e.message || String(e);
       if (errMsg === "Failed to fetch" || e.name === "TypeError") {
-        errMsg = "Network Error (CORS or URL blocked). Verify custom script Web App setup: Web App > Anyone > Me.";
+        errMsg = "Network Error (CORS or blocked request). Verify your script is deployed as Web App for 'Anyone'.";
       }
 
-      if (!isSilent) {
-        if (localData.length === 0) {
-          setLastError(errMsg);
-          setConnectionStatus('error');
-          setIsErrorModalOpen(true);
-        } else {
-          console.warn("Active sync failed, using cached data:", errMsg);
-        }
+      if (!localData || localData.length === 0) {
+        setLastError(errMsg);
+        setConnectionStatus('error');
+        setIsErrorModalOpen(true);
       } else {
-        console.warn("Silent background sync failed, keeping loaded local cache:", errMsg);
+        console.warn("Silent sync failed, utilizing offline cache:", errMsg);
+        if (forceManual) {
+          alert(`Could not sync with Google Sheets:\n${errMsg}\n\nUsing offline client cache with ${localData.length} records.`);
+        }
       }
     } finally {
-      if (!isSilent) {
-        setIsSyncing(false);
-      }
+      setIsSyncing(false);
+    }
+  };
+
+  const clearLocalCache = () => {
+    if (window.confirm("Are you sure you want to clear your local database cache? You will need an active internet connection to download data again.")) {
+      localStorage.removeItem('examiner_local_data');
+      localStorage.removeItem('examiner_db_stats');
+      localStorage.removeItem('examiner_last_sync');
+      setLocalData([]);
+      setDbStats({ rowCount: null });
+      setLastSyncTime(0);
+      setConnectionStatus('connecting');
+      alert("Cache cleared successfully. Please click sync to download data again.");
     }
   };
 
@@ -756,22 +754,32 @@ export default function App() {
           <div className="flex items-center gap-3">
             <button 
               onClick={() => checkConnection(undefined, true)}
-              className="flex items-center gap-2 bg-white border border-slate-200 shadow-sm text-indigo-600 px-3 py-1.5 rounded-xl text-sm font-semibold hover:bg-indigo-50 transition-all hover:shadow"
+              disabled={isSyncing}
+              className="flex items-center gap-2 bg-white border border-slate-200 shadow-sm text-indigo-600 px-3 py-1.5 rounded-xl text-sm font-semibold hover:bg-indigo-50 transition-all hover:shadow disabled:opacity-55 disabled:cursor-not-allowed cursor-pointer"
               title="Refresh local database"
             >
               <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-              Sync
+              {isSyncing ? 'Syncing...' : 'Sync Database'}
             </button>
+            {localData && localData.length > 0 && (
+              <button 
+                onClick={clearLocalCache}
+                className="flex items-center gap-1.5 bg-white border border-slate-200 shadow-sm text-rose-600 px-3 py-1.5 rounded-xl text-sm font-semibold hover:bg-rose-50 transition-all hover:shadow cursor-pointer"
+                title="Clear cached data"
+              >
+                Clear Cache
+              </button>
+            )}
             <button 
               onClick={() => setIsColModalOpen(true)}
-              className="flex items-center gap-2 bg-white border border-slate-200 shadow-sm text-slate-600 px-3 py-1.5 rounded-xl text-sm font-semibold hover:bg-slate-50 hover:text-indigo-600 transition-all hover:shadow"
+              className="flex items-center gap-2 bg-white border border-slate-200 shadow-sm text-slate-600 px-3 py-1.5 rounded-xl text-sm font-semibold hover:bg-slate-50 hover:text-indigo-600 transition-all hover:shadow cursor-pointer"
             >
               <LayoutGrid className="w-4 h-4" />
               Columns
             </button>
             <button 
               onClick={exportToExcel}
-              className="flex items-center gap-2 bg-white border border-slate-200 shadow-sm text-slate-600 px-3 py-1.5 rounded-xl text-sm font-semibold hover:bg-slate-50 hover:text-indigo-600 transition-all hover:shadow active:scale-95"
+              className="flex items-center gap-2 bg-white border border-slate-200 shadow-sm text-slate-600 px-3 py-1.5 rounded-xl text-sm font-semibold hover:bg-slate-50 hover:text-indigo-600 transition-all hover:shadow active:scale-95 cursor-pointer"
               title="Download results as Excel (.xlsx)"
             >
               <Download className="w-4 h-4" />
@@ -779,9 +787,9 @@ export default function App() {
             </button>
             <button 
               onClick={clearAll}
-              className="flex items-center gap-2 bg-white border border-slate-200 shadow-sm text-rose-600 px-3 py-1.5 rounded-xl text-sm font-semibold hover:bg-rose-50 hover:text-rose-700 transition-all hover:shadow"
+              className="flex items-center gap-2 bg-white border border-slate-200 shadow-sm text-rose-600 px-3 py-1.5 rounded-xl text-sm font-semibold hover:bg-rose-50 hover:text-rose-700 transition-all hover:shadow cursor-pointer"
             >
-               Clear All
+               Clear Rows
             </button>
           </div>
 
