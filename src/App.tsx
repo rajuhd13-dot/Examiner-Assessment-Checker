@@ -115,6 +115,44 @@ const getScriptUrl = () => {
   return url.trim();
 };
 
+// Help fetch bypass CORS / sandbox / multi-login Google redirects in sandboxed iframes
+const fetchWithFallback = async (targetUrl: string): Promise<Response> => {
+  try {
+    const res = await fetch(targetUrl);
+    if (res.ok) return res;
+    throw new Error(`HTTP ${res.status}`);
+  } catch (err: any) {
+    const errMsg = (err?.message || String(err)).toLowerCase();
+    const isCorsOrNetwork = 
+      errMsg.includes("fetch") || 
+      err?.name === "TypeError" || 
+      errMsg.includes("http 0") || 
+      errMsg.includes("network") ||
+      errMsg.includes("failed to") ||
+      errMsg.includes("cors");
+      
+    if (isCorsOrNetwork) {
+      console.warn("Direct fetch blocked or failed. Retrying through CORS Proxy Bridge 1...");
+      try {
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+        const res = await fetch(proxyUrl);
+        if (res.ok) return res;
+      } catch (proxyErr) {
+        console.warn("CORS Proxy 1 failed, trying CORS Proxy Bridge 2...", proxyErr);
+      }
+
+      try {
+        const proxyUrl2 = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+        const res = await fetch(proxyUrl2);
+        if (res.ok) return res;
+      } catch (proxyErr2) {
+        console.warn("CORS Proxy 2 failed. Request cannot be proxy bridged.");
+      }
+    }
+    throw err;
+  }
+};
+
 const lookupExaminer = async (query: string): Promise<{ success: boolean; found: boolean; data?: Examiner; error?: string }> => {
   const scriptBaseUrl = getScriptUrl();
   
@@ -132,7 +170,7 @@ const lookupExaminer = async (query: string): Promise<{ success: boolean; found:
   try {
     const separator = scriptBaseUrl.includes('?') ? '&' : '?';
     const url = `${scriptBaseUrl}${separator}action=lookup&query=${encodeURIComponent(query)}&_t=${Date.now()}`;
-    const response = await fetch(url);
+    const response = await fetchWithFallback(url);
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -253,7 +291,7 @@ export default function App() {
       let syncAttemptSuccess = false;
 
       try {
-        const res = await fetch(syncUrl);
+        const res = await fetchWithFallback(syncUrl);
         
         if (res.ok) {
           const tempJson = await res.json();
@@ -272,7 +310,7 @@ export default function App() {
       // Step 2: Fallback to action=filterOptions if action=sync was not successful or failed
       if (!syncAttemptSuccess || !data) {
         const fallbackUrl = `${scriptBaseUrl}${separator}action=filterOptions&_t=${Date.now()}`;
-        const fallbackRes = await fetch(fallbackUrl);
+        const fallbackRes = await fetchWithFallback(fallbackUrl);
         
         if (!fallbackRes.ok) {
           throw new Error(`HTTP ${fallbackRes.status}. Could not sync with spreadsheet.`);
@@ -696,7 +734,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans selection:bg-indigo-100 selection:text-indigo-900 flex flex-col">
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans selection:bg-indigo-100 selection:text-indigo-900 flex flex-col relative">
       <header className="bg-indigo-700 text-white sticky top-0 z-40 shadow-md">
         <div className="max-w-[1600px] mx-auto px-6 py-2 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-4">
@@ -994,8 +1032,8 @@ export default function App() {
       </main>
 
       {isColModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
-          <div className="bg-white rounded-lg shadow-2xl w-full max-w-4xl overflow-hidden border border-slate-200">
+        <div className="absolute inset-x-0 top-0 min-h-full bg-slate-900/40 backdrop-blur-sm z-50 flex justify-center items-start p-4 animate-in fade-in zoom-in duration-200 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-4xl overflow-hidden border border-slate-200 mt-12 md:mt-24 mb-12">
             {/* Header */}
             <div className="bg-[#1a73e8] px-6 py-3 flex items-center justify-between text-white">
               <h3 className="text-lg font-bold">Column Settings</h3>
@@ -1047,8 +1085,8 @@ export default function App() {
         </div>
       )}
       {isErrorModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-100 scale-in-center">
+        <div className="absolute inset-x-0 top-0 min-h-full bg-slate-900/60 backdrop-blur-md z-[60] flex justify-center items-start p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-100 scale-in-center mt-12 md:mt-24 mb-12">
             <div className={`${connectionStatus === 'connected' ? 'bg-indigo-600' : 'bg-rose-600'} px-6 py-4 flex items-center gap-3 text-white`}>
               {connectionStatus === 'connected' ? <CheckCircle2 className="w-6 h-6 shrink-0" /> : <XCircle className="w-6 h-6 shrink-0" />}
               <div>
@@ -1145,8 +1183,8 @@ export default function App() {
       )}
 
       {selectedExaminer && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[70] flex items-center justify-center p-4 animate-in fade-in duration-300">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col border border-slate-100 scale-in-center">
+        <div className="absolute inset-x-0 top-0 min-h-full bg-slate-900/60 backdrop-blur-md z-[70] flex justify-center items-start p-4 overflow-y-auto animate-in fade-in duration-300">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl overflow-hidden border border-slate-100 scale-in-center mt-12 md:mt-24 mb-16">
              <div className="bg-indigo-700 px-8 py-6 text-white relative">
                 <button 
                   onClick={() => setSelectedExaminer(null)}
@@ -1171,7 +1209,7 @@ export default function App() {
                 </div>
              </div>
 
-             <div className="flex-1 overflow-y-auto bg-slate-50">
+             <div className="bg-slate-50">
                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-8">
                   {/* Left Column: Personal info */}
                   <div className="lg:col-span-1 space-y-6">
