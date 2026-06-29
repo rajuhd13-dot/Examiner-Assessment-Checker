@@ -8,7 +8,8 @@ import * as XLSX from 'xlsx';
 import { 
   Search, Download, Plus, RefreshCw, 
   XCircle, CheckCircle2, FileSpreadsheet, X, LayoutGrid,
-  MessageSquare, Send, Phone
+  MessageSquare, Send, Phone, TrendingUp, AlertTriangle, Users,
+  BookOpen, Sparkles, ChevronDown, ChevronUp, Info, Keyboard
 } from 'lucide-react';
 
 /**
@@ -110,6 +111,108 @@ const ALL_COLS: ColDef[] = [
 // --- Backend Integration ---
 const DEFAULT_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyesBP9GFM2tcfDdr_eBUGhUA-lLxF-9jSUHN4xpngdKyLb2vaeRJ9SbmxgiY5Zg-0-jg/exec';
 
+// High-capacity IndexedDB storage for database caching >5MB limit
+const IDB_DB_NAME = 'ExaminerDB';
+const IDB_STORE_NAME = 'cache';
+const IDB_KEY = 'examiner_local_data';
+
+const getIndexedDBData = (): Promise<any[][] | null> => {
+  return new Promise((resolve) => {
+    try {
+      const request = indexedDB.open(IDB_DB_NAME, 1);
+      request.onupgradeneeded = (e) => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(IDB_STORE_NAME)) {
+          db.createObjectStore(IDB_STORE_NAME);
+        }
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        try {
+          if (!db.objectStoreNames.contains(IDB_STORE_NAME)) {
+            resolve(null);
+            return;
+          }
+          const transaction = db.transaction(IDB_STORE_NAME, 'readonly');
+          const store = transaction.objectStore(IDB_STORE_NAME);
+          const getReq = store.get(IDB_KEY);
+          getReq.onsuccess = () => {
+            resolve(getReq.result || null);
+          };
+          getReq.onerror = () => resolve(null);
+        } catch {
+          resolve(null);
+        }
+      };
+      request.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+};
+
+const setIndexedDBData = (data: any[][]): Promise<boolean> => {
+  return new Promise((resolve) => {
+    try {
+      const request = indexedDB.open(IDB_DB_NAME, 1);
+      request.onupgradeneeded = (e) => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(IDB_STORE_NAME)) {
+          db.createObjectStore(IDB_STORE_NAME);
+        }
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        try {
+          const transaction = db.transaction(IDB_STORE_NAME, 'readwrite');
+          const store = transaction.objectStore(IDB_STORE_NAME);
+          const putReq = store.put(data, IDB_KEY);
+          putReq.onsuccess = () => resolve(true);
+          putReq.onerror = () => resolve(false);
+        } catch {
+          resolve(false);
+        }
+      };
+      request.onerror = () => resolve(false);
+    } catch {
+      resolve(false);
+    }
+  });
+};
+
+const deleteIndexedDBData = (): Promise<boolean> => {
+  return new Promise((resolve) => {
+    try {
+      const request = indexedDB.open(IDB_DB_NAME, 1);
+      request.onupgradeneeded = (e) => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(IDB_STORE_NAME)) {
+          db.createObjectStore(IDB_STORE_NAME);
+        }
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        try {
+          if (!db.objectStoreNames.contains(IDB_STORE_NAME)) {
+            resolve(true);
+            return;
+          }
+          const transaction = db.transaction(IDB_STORE_NAME, 'readwrite');
+          const store = transaction.objectStore(IDB_STORE_NAME);
+          const delReq = store.delete(IDB_KEY);
+          delReq.onsuccess = () => resolve(true);
+          delReq.onerror = () => resolve(false);
+        } catch {
+          resolve(false);
+        }
+      };
+      request.onerror = () => resolve(false);
+    } catch {
+      resolve(false);
+    }
+  });
+};
+
 const getScriptUrl = () => {
   const url = localStorage.getItem('examiner_script_url') || DEFAULT_SCRIPT_URL;
   return url.trim();
@@ -195,7 +298,25 @@ export default function App() {
   const [globalSearch, setGlobalSearch] = useState('');
   const [isColModalOpen, setIsColModalOpen] = useState(false);
   const [isErrorModalOpen, setIsErrorModalOpen] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error'>(() => {
+    try {
+      const stats = localStorage.getItem('examiner_db_stats');
+      if (stats) {
+        const parsed = JSON.parse(stats);
+        if (parsed && typeof parsed.rowCount === 'number' && parsed.rowCount > 0) {
+          return 'connected';
+        }
+      }
+      const cached = localStorage.getItem('examiner_local_data');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return 'connected';
+        }
+      }
+    } catch {}
+    return 'connecting';
+  });
   const [customUrl, setCustomUrl] = useState(getScriptUrl());
   const [lastError, setLastError] = useState<string | null>(null);
   const [localData, setLocalData] = useState<any[][]>(() => {
@@ -268,12 +389,196 @@ export default function App() {
 
   const [selectedExaminer, setSelectedExaminer] = useState<Examiner | null>(null);
 
+  // --- Enhanced features and premium styling states ---
+  const [focusedRowId, setFocusedRowId] = useState<string | null>(null);
+  const [rowSuggestions, setRowSuggestions] = useState<{ name: string; tpin: string; mobile: string; raw: any[] }[]>([]);
+  
+  const [globalSuggestions, setGlobalSuggestions] = useState<{ name: string; tpin: string; mobile: string; raw: any[] }[]>([]);
+  const [showGlobalSuggestions, setShowGlobalSuggestions] = useState(false);
+  
+  const [isRemarksInspectorOpen, setIsRemarksInspectorOpen] = useState(false);
+  const [remarksSearchQuery, setRemarksSearchQuery] = useState('');
+  const [showStatsDashboard, setShowStatsDashboard] = useState(false);
+  const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
+  const [selectedBatchForExplorer, setSelectedBatchForExplorer] = useState<string | null>(null);
+  const [batchSearchQuery, setBatchSearchQuery] = useState('');
+
+  // Bento Dashboard Stats Summary
+  const statsSummary = React.useMemo(() => {
+    if (!localData || localData.length === 0) {
+      return {
+        total: dbStats.rowCount || 0,
+        passRate: 0,
+        flagged: 0,
+        batches: [] as { name: string; count: number }[],
+      };
+    }
+    
+    const total = localData.length;
+    let flaggedCount = 0;
+    let totalScored = 0;
+    let totalPassed = 0;
+    const batchMap: Record<string, number> = {};
+    
+    const scoreCols = [61, 64, 67, 70, 73, 76, 79];
+    const curThresholds = thresholds || THRESHOLDS;
+    const thresholdVals = [
+      curThresholds.english || THRESHOLDS.english,
+      curThresholds.bangla || THRESHOLDS.bangla,
+      curThresholds.physics || THRESHOLDS.physics,
+      curThresholds.chemistry || THRESHOLDS.chemistry,
+      curThresholds.math || THRESHOLDS.math,
+      curThresholds.biology || THRESHOLDS.biology,
+      curThresholds.ict || THRESHOLDS.ict
+    ];
+
+    for (let i = 0; i < localData.length; i++) {
+      const row = localData[i];
+      
+      // Extract warning remark numerical level
+      const rmVal = String(row[7] || '');
+      const rmNum = parseInt(rmVal.match(/\d+/)?.[0] || '0', 10);
+      const remarkRaw = String(row[92] || '').trim();
+      if (rmNum >= 4 || (remarkRaw.length > 0 && rmNum > 0)) {
+        flaggedCount++;
+      }
+      
+      const batch = String(row[6] || '').trim();
+      if (batch) {
+        batchMap[batch] = (batchMap[batch] || 0) + 1;
+      }
+
+      for (let s = 0; s < scoreCols.length; s++) {
+        const scoreIdx = scoreCols[s];
+        const rawScore = String(row[scoreIdx] || '').trim();
+        if (rawScore !== '' && rawScore !== '—') {
+          totalScored++;
+          let scoreNum = 0;
+          if (rawScore.includes('/')) {
+            const parts = rawScore.split('/');
+            const achieved = parseFloat(parts[0]);
+            const outOf = parseFloat(parts[1]);
+            if (outOf > 0) {
+              scoreNum = Math.round((achieved / outOf) * 100);
+            }
+          } else {
+            scoreNum = parseFloat(rawScore);
+          }
+          if (scoreNum >= thresholdVals[s]) {
+            totalPassed++;
+          }
+        }
+      }
+    }
+    
+    const topBatches = Object.entries(batchMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([name, count]) => ({ name, count }));
+
+    return {
+      total,
+      passRate: totalScored > 0 ? Math.round((totalPassed / totalScored) * 100) : 0,
+      flagged: flaggedCount,
+      batches: topBatches,
+    };
+  }, [localData, thresholds, dbStats.rowCount]);
+
+  const selectSuggestion = (rowId: string, sug: { name: string; tpin: string; mobile: string }) => {
+    setRows(prev => prev.map(r => r.id === rowId ? { ...r, inputValue: sug.tpin, status: 'idle', data: null } : r));
+    setFocusedRowId(null);
+    setRowSuggestions([]);
+    executeSearch(rowId, sug.tpin);
+  };
+
+  const handleGlobalSearchChange = (val: string) => {
+    setGlobalSearch(val);
+    if (val.trim().length >= 2 && localData.length > 0) {
+      const q = val.toLowerCase().trim();
+      const matches: typeof globalSuggestions = [];
+      for (let i = 0; i < localData.length; i++) {
+        const row = localData[i];
+        const name = String(row[1] || '').trim();
+        const tpin = String(row[3] || '').trim();
+        const mobile = String(row[9] || '').trim().replace(/\.0$/, '');
+        const altMobile = String(row[10] || '').trim().replace(/\.0$/, '');
+        
+        if (
+          name.toLowerCase().includes(q) ||
+          tpin.toLowerCase().includes(q) ||
+          mobile.includes(q) ||
+          altMobile.includes(q)
+        ) {
+          matches.push({ name, tpin, mobile: padMobile(row[9]), raw: row });
+          if (matches.length >= 8) break;
+        }
+      }
+      setGlobalSuggestions(matches);
+      setShowGlobalSuggestions(true);
+    } else {
+      setGlobalSuggestions([]);
+      setShowGlobalSuggestions(false);
+    }
+  };
+
+  const handleSelectGlobalSuggestion = (suggestion: { name: string; tpin: string; mobile: string; raw: any[] }) => {
+    const r = suggestion.raw;
+    const curThresholds = thresholds || THRESHOLDS;
+
+    const extractNum = (v: any) => {
+      const m = String(v || '').match(/\d+/);
+      return m ? Number(m[0]) : 0;
+    };
+
+    const parseRemark = (raw: string, rmNum: number) => {
+      const show = (rmNum >= 4) || (raw.length > 0 && rmNum > 0);
+      if (!show || !raw) return { count: rmNum, show: false, body: '', byLine: '', dateLine: '' };
+      return { count: rmNum, show: true, body: raw, byLine: '', dateLine: '' };
+    };
+
+    const examiner: Examiner = {
+      sl: String(r[0] || '').trim(),
+      name: String(r[1] || '').trim(),
+      tpin: String(r[3] || '').trim(),
+      inst: String(r[4] || '').trim(),
+      dept: String(r[5] || '').trim(),
+      batch: String(r[6] || '').trim(),
+      rm: String(r[7] || '').trim(),
+      mobile: padMobile(r[9]),
+      alternate: padMobile(r[10]),
+      nagad: padMobile(r[11]),
+      hscGpa: String(r[31] || '').trim(),
+      homeDistrict: String(r[60] || '').trim(),
+      email: String(r[22] || '').trim(),
+      hscBoard: String(r[30] || '').trim(),
+      subjectsChoice: [r[34], r[35], r[36], r[37], r[38]].filter(Boolean).join(', '),
+      runningProgram: String(r[16] || '').trim(),
+      english: parseScore(r[61], curThresholds.english || THRESHOLDS.english),
+      bangla: parseScore(r[64], curThresholds.bangla || THRESHOLDS.bangla),
+      physics: parseScore(r[67], curThresholds.physics || THRESHOLDS.physics), 
+      chemistry: parseScore(r[70], curThresholds.chemistry || THRESHOLDS.chemistry),
+      math: parseScore(r[73], curThresholds.math || THRESHOLDS.math),
+      biology: parseScore(r[76], curThresholds.biology || THRESHOLDS.biology),
+      ict: parseScore(r[79], curThresholds.ict || THRESHOLDS.ict),
+      training: String(r[82] || '').trim(),
+      trainingDate: String(r[83] || '').trim(),
+      campus: String(r[88] || '').trim(),
+      remarkedBy: String(r[8] || '').trim(),
+      remark: parseRemark(String(r[92] || ''), extractNum(r[7]))
+    };
+
+    setSelectedExaminer(examiner);
+    setGlobalSearch('');
+    setGlobalSuggestions([]);
+    setShowGlobalSuggestions(false);
+  };
+
   // Helper to re-run connection check and SYNC
   const checkConnection = async (targetUrl?: string, forceManual?: boolean, isSilent?: boolean) => {
     const scriptBaseUrl = targetUrl || getScriptUrl();
     
-    // Check if cache exists in localStorage or in memory
-    const hasCache = !!localStorage.getItem('examiner_local_data') || (localData && localData.length > 0);
+    // Check if cache exists in localStorage, IndexedDB or in memory
+    const hasCache = !!localStorage.getItem('examiner_db_stats') || (localData && localData.length > 0);
     const isActuallySilent = isSilent && hasCache;
 
     // FAST CONNECT: If we have cached data, we are "connected" instantly (0-1 seconds)
@@ -344,10 +649,21 @@ export default function App() {
         const fetchedRows = data.data || data.rows;
         if (fetchedRows && Array.isArray(fetchedRows) && fetchedRows.length > 0) {
           setLocalData(fetchedRows);
+          
+          // Asynchronously save to IndexedDB (handles up to gigabytes of data seamlessly)
+          setIndexedDBData(fetchedRows).then(success => {
+            if (success) {
+              console.log("Successfully cached large dataset in IndexedDB");
+            } else {
+              console.warn("Failed to cache dataset in IndexedDB");
+            }
+          });
+
+          // Standard localStorage for small datasets (and backwards compatibility), wrapped safely
           try {
             localStorage.setItem('examiner_local_data', JSON.stringify(fetchedRows));
           } catch (storageErr) {
-            console.warn("Storage quota exceeded, keeping in browser memory. Clear other domain cache.");
+            console.warn("Storage quota exceeded for localStorage (expected for datasets > 5MB). Preserving inside IndexedDB and memory.");
           }
           
           const recordCount = fetchedRows.length;
@@ -404,8 +720,9 @@ export default function App() {
     }
   };
 
-  const clearLocalCache = () => {
+  const clearLocalCache = async () => {
     if (window.confirm("Are you sure you want to clear your local database cache? You will need an active internet connection to download data again.")) {
+      await deleteIndexedDBData();
       localStorage.removeItem('examiner_local_data');
       localStorage.removeItem('examiner_db_stats');
       localStorage.removeItem('examiner_last_sync');
@@ -427,33 +744,104 @@ export default function App() {
     }));
     setRows(initialRows);
     
-    // Check if cache exists in localStorage or memory
-    const hasCache = !!localStorage.getItem('examiner_local_data');
-    
-    // On mount, perform silent background sync if cached data is present.
-    // This makes the app load INSTANTLY into "Instant Mode Active" state.
-    // If no cache exists, do a normal foreground load.
-    if (hasCache) {
-      checkConnection(undefined, false, true);
-    } else {
-      checkConnection();
-    }
+    // Asynchronously load cached data on mount
+    const loadCachedAndSync = async () => {
+      // 1. Try to load from high-capacity IndexedDB first (handles large datasets > 5MB)
+      const idbData = await getIndexedDBData();
+      if (idbData && idbData.length > 0) {
+        setLocalData(idbData);
+        setConnectionStatus('connected');
+        // Instantly ready! Trigger a silent background sync to fetch any updates from Google Sheet
+        checkConnection(undefined, false, true);
+      } else {
+        // 2. Fallback to standard localStorage
+        try {
+          const cached = localStorage.getItem('examiner_local_data');
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setLocalData(parsed);
+              setConnectionStatus('connected');
+              checkConnection(undefined, false, true);
+              return;
+            }
+          }
+        } catch {}
 
-    // Auto-refresh in the background every 5 minutes during active hours (8 AM to 11 PM)
+        // 3. Check if we have stats cached, meaning we previously synced.
+        // Even if localData was cleared from localStorage due to quota, we can try to silent sync first.
+        const hasStatsCached = !!localStorage.getItem('examiner_db_stats');
+        if (hasStatsCached) {
+          setConnectionStatus('connected');
+          checkConnection(undefined, false, true);
+        } else {
+          // No cache exists at all (first time opening) - perform a normal foreground load
+          checkConnection();
+        }
+      }
+    };
+
+    loadCachedAndSync();
+
+    // Auto-refresh in the background every 3 minutes (24/7)
     const intervalId = setInterval(() => {
-      const now = new Date();
-      const hr = now.getHours();
-      const withinActiveHours = hr >= 8 && hr < 23; // 8 AM to 11 PM
-      
-      const hasCacheNow = !!localStorage.getItem('examiner_local_data');
-      if (withinActiveHours && hasCacheNow) {
+      const hasCacheNow = !!localStorage.getItem('examiner_db_stats');
+      if (hasCacheNow) {
         console.log("Auto background sync: updating database...");
         checkConnection(undefined, false, true);
       }
-    }, 5 * 60 * 1000); // 5 minutes
+    }, 3 * 60 * 1000); // 3 minutes
 
     return () => clearInterval(intervalId);
   }, []);
+
+  // Global Keyboard Shortcuts and click outside handler
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.relative')) {
+        setFocusedRowId(null);
+        setShowGlobalSuggestions(false);
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+
+    const handleKeyDownGlobal = (e: KeyboardEvent) => {
+      if (
+        document.activeElement?.tagName === 'INPUT' || 
+        document.activeElement?.tagName === 'TEXTAREA'
+      ) {
+        if (e.key === 'Escape') {
+          setFocusedRowId(null);
+          setShowGlobalSuggestions(false);
+        }
+        return;
+      }
+      
+      if (e.altKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        addRows(100);
+      } else if (e.altKey && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        clearAll();
+      } else if (e.altKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        searchAll();
+      } else if (e.key === 'Escape') {
+        setSelectedExaminer(null);
+        setIsRemarksInspectorOpen(false);
+        setIsShortcutsModalOpen(false);
+        setIsColModalOpen(false);
+        setSelectedBatchForExplorer(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDownGlobal as any);
+
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDownGlobal as any);
+    };
+  }, [rows, localData]);
 
   const resetToDefault = () => {
     localStorage.removeItem('examiner_script_url');
@@ -491,6 +879,34 @@ export default function App() {
 
   const handleRowInput = (id: string, val: string) => {
     setRows(prev => prev.map(r => r.id === id ? { ...r, inputValue: val, status: 'idle', data: null } : r));
+    
+    // Calculate autocomplete suggestions
+    if (val.trim().length >= 2 && localData.length > 0) {
+      const q = val.toLowerCase().trim();
+      const matches: typeof rowSuggestions = [];
+      for (let i = 0; i < localData.length; i++) {
+        const row = localData[i];
+        const name = String(row[1] || '').trim();
+        const tpin = String(row[3] || '').trim();
+        const mobile = String(row[9] || '').trim().replace(/\.0$/, '');
+        const altMobile = String(row[10] || '').trim().replace(/\.0$/, '');
+        
+        if (
+          name.toLowerCase().includes(q) ||
+          tpin.toLowerCase().includes(q) ||
+          mobile.includes(q) ||
+          altMobile.includes(q)
+        ) {
+          matches.push({ name, tpin, mobile: padMobile(row[9]), raw: row });
+          if (matches.length >= 6) break;
+        }
+      }
+      setRowSuggestions(matches);
+      setFocusedRowId(id);
+    } else {
+      setRowSuggestions([]);
+      setFocusedRowId(null);
+    }
   };
 
   const executeSearch = async (id: string, query: string) => {
@@ -794,8 +1210,12 @@ export default function App() {
                'Connection Error (Setup API)')}
             </div>
             {lastSyncTime > 0 && !isSyncing && (
-              <div className="text-[10px] text-indigo-300 opacity-60 ml-2 italic">
-                Last updated: {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              <div className="text-[10px] text-emerald-300 font-medium ml-2 flex items-center gap-1.5 bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                <span className="relative flex h-1.5 w-1.5 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                </span>
+                <span>Auto Live Sync: Synced {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               </div>
             )}
           </div>
@@ -810,11 +1230,41 @@ export default function App() {
               <Search className="w-4 h-4 text-indigo-300 absolute left-3 top-1/2 -translate-y-1/2 transition-colors group-focus-within:text-indigo-200" />
               <input 
                 className="bg-indigo-800/60 border border-indigo-600/50 text-sm text-white placeholder-indigo-300 rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-indigo-800 transition-all w-64 md:w-80 shadow-inner"
-                placeholder="(T-Pin or Mobile)..."
+                placeholder="Search T-PIN, mobile, or name..."
                 value={globalSearch}
-                onChange={e => setGlobalSearch(e.target.value)}
+                onChange={e => handleGlobalSearchChange(e.target.value)}
                 onKeyDown={handleGlobalSearch}
+                onFocus={() => {
+                  if (globalSearch.trim().length >= 2) setShowGlobalSuggestions(true);
+                }}
               />
+              {showGlobalSuggestions && globalSuggestions.length > 0 && (
+                <div className="absolute right-0 w-80 md:w-96 top-full mt-2 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden divide-y divide-slate-100 animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="px-3.5 py-2 bg-indigo-50/50 text-indigo-800 text-[10px] font-black uppercase tracking-wider flex items-center justify-between">
+                     <span>Database Matches ({globalSuggestions.length})</span>
+                     <span className="text-[9px] text-slate-400 font-medium font-sans">Click for Instant View</span>
+                  </div>
+                  <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
+                    {globalSuggestions.map((sug, idx) => (
+                      <button
+                        key={`${sug.tpin}-${idx}`}
+                        type="button"
+                        onClick={() => handleSelectGlobalSuggestion(sug)}
+                        className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 transition-colors flex flex-col gap-0.5 cursor-pointer"
+                      >
+                        <div className="flex justify-between items-center">
+                          <span className="text-[13px] font-bold text-slate-800 truncate max-w-[200px]">{sug.name}</span>
+                          <span className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-black font-mono">{sug.tpin}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-[10px] text-slate-400 font-semibold">
+                          <span>{sug.mobile}</span>
+                          <span className="text-indigo-600 hover:underline text-[9px] font-bold">Quick View</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                  <kbd className="hidden md:inline-block text-[10px] bg-indigo-900/50 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-700">↵</kbd>
               </div>
@@ -824,6 +1274,100 @@ export default function App() {
       </header>
 
       <main className="max-w-[1600px] mx-auto px-6 py-3 flex-1 w-full relative">
+        {showStatsDashboard && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-5 animate-in slide-in-from-top-4 duration-300">
+            {/* Widget 1: Total Cached Records */}
+            <div className="bg-white border border-slate-200/80 p-5 rounded-2xl shadow-sm flex items-center justify-between group hover:border-indigo-300 transition-all duration-300 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50/30 rounded-full translate-x-10 -translate-y-10 group-hover:scale-110 transition-transform" />
+              <div className="space-y-1 relative z-10">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Local Database</span>
+                <span className="text-3xl font-black text-slate-900 leading-tight">
+                  {statsSummary.total ? statsSummary.total.toLocaleString() : '0'}
+                </span>
+                <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  IndexedDB Active
+                </span>
+              </div>
+              <div className="bg-indigo-50 p-3.5 rounded-xl text-indigo-600 relative z-10 group-hover:bg-indigo-600 group-hover:text-white transition-colors duration-300">
+                <Users className="w-6 h-6" />
+              </div>
+            </div>
+
+            {/* Widget 2: Subject Success Rate */}
+            <div className="bg-white border border-slate-200/80 p-5 rounded-2xl shadow-sm flex items-center justify-between group hover:border-emerald-300 transition-all duration-300 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50/30 rounded-full translate-x-10 -translate-y-10 group-hover:scale-110 transition-transform" />
+              <div className="space-y-1 relative z-10">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Success Rate</span>
+                <span className="text-3xl font-black text-slate-900 leading-tight">
+                  {statsSummary.passRate}%
+                </span>
+                <span className="text-xs text-slate-500 font-medium">Average passing examiners</span>
+              </div>
+              <div className="bg-emerald-50 p-3.5 rounded-xl text-emerald-600 relative z-10 group-hover:bg-emerald-600 group-hover:text-white transition-colors duration-300">
+                <TrendingUp className="w-6 h-6" />
+              </div>
+            </div>
+
+            {/* Widget 3: Flagged Remarks */}
+            <div 
+              onClick={() => {
+                if (statsSummary.flagged > 0) {
+                  setIsRemarksInspectorOpen(true);
+                }
+              }}
+              className={`bg-white border border-slate-200/80 p-5 rounded-2xl shadow-sm flex items-center justify-between group hover:border-rose-300 transition-all duration-300 relative overflow-hidden ${statsSummary.flagged > 0 ? 'cursor-pointer hover:shadow-md' : ''}`}
+            >
+              <div className="absolute top-0 right-0 w-32 h-32 bg-rose-50/30 rounded-full translate-x-10 -translate-y-10 group-hover:scale-110 transition-transform" />
+              <div className="space-y-1 relative z-10">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Critical Warnings</span>
+                <span className="text-3xl font-black text-rose-600 leading-tight">
+                  {statsSummary.flagged}
+                </span>
+                <span className="text-xs text-rose-500 font-bold flex items-center gap-1 hover:underline">
+                  {statsSummary.flagged > 0 ? '⚠️ Click to inspect remarks' : 'No warnings recorded'}
+                </span>
+              </div>
+              <div className={`p-3.5 rounded-xl relative z-10 transition-colors duration-300 ${statsSummary.flagged > 0 ? 'bg-rose-50 text-rose-600 group-hover:bg-rose-600 group-hover:text-white' : 'bg-slate-50 text-slate-400'}`}>
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+            </div>
+
+            {/* Widget 4: Top Batches */}
+            <div className="bg-white border border-slate-200/80 p-5 rounded-2xl shadow-sm flex flex-col justify-between group hover:border-indigo-300 transition-all duration-300 relative overflow-hidden">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Primary Batches</span>
+                {statsSummary.batches.length > 0 && (
+                  <span className="text-[9px] text-indigo-500 font-bold bg-indigo-50 px-1.5 py-0.5 rounded-full animate-pulse">Click to Explore</span>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1.5 z-10 relative">
+                {statsSummary.batches.length > 0 ? (
+                  statsSummary.batches.map(b => (
+                    <button 
+                      key={b.name} 
+                      type="button"
+                      onClick={() => {
+                        setSelectedBatchForExplorer(b.name);
+                        setBatchSearchQuery('');
+                      }}
+                      className="inline-flex items-center gap-1 bg-slate-50 border border-slate-100 text-slate-700 text-xs font-bold px-2.5 py-1 rounded-lg hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-700 active:scale-95 transition-all cursor-pointer"
+                      title={`Explore HSC Batch ${b.name}`}
+                    >
+                      Batch {b.name} <span className="bg-slate-200 text-slate-600 px-1 py-0.2 rounded-md text-[9px] font-black transition-colors">{b.count}</span>
+                    </button>
+                  ))
+                ) : (
+                  <span className="text-xs text-slate-400">Sync database to load</span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-3 gap-4">
           <div className="flex items-center gap-3">
             <button 
@@ -850,6 +1394,22 @@ export default function App() {
             >
               <LayoutGrid className="w-4 h-4" />
               Columns
+            </button>
+            <button 
+              onClick={() => setIsShortcutsModalOpen(true)}
+              className="flex items-center gap-2 bg-white border border-slate-200 shadow-sm text-slate-600 px-3 py-1.5 rounded-xl text-sm font-semibold hover:bg-slate-50 hover:text-indigo-600 transition-all hover:shadow cursor-pointer"
+              title="View Keyboard Shortcuts Guide"
+            >
+              <Keyboard className="w-4 h-4" />
+              Shortcuts
+            </button>
+            <button 
+              onClick={() => setShowStatsDashboard(!showStatsDashboard)}
+              className={`flex items-center gap-2 bg-white border border-slate-200 shadow-sm px-3 py-1.5 rounded-xl text-sm font-semibold transition-all hover:shadow cursor-pointer ${showStatsDashboard ? 'text-indigo-600 border-indigo-200 bg-indigo-50/20' : 'text-slate-600 hover:text-indigo-600'}`}
+              title="Show or hide stats summary dashboard"
+            >
+              <TrendingUp className="w-4 h-4" />
+              {showStatsDashboard ? 'Hide Stats' : 'Show Stats'}
             </button>
             <button 
               onClick={exportToExcel}
@@ -1379,6 +1939,379 @@ export default function App() {
                     </button>
                  </div>
              </div>
+          </div>
+        </div>
+      )}
+
+      {/* Shortcuts Guide Modal */}
+      {isShortcutsModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[80] flex justify-center items-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-100 p-6 animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Keyboard className="w-5 h-5 text-indigo-600" />
+                <h3 className="text-lg font-black text-slate-800">Keyboard Shortcuts</h3>
+              </div>
+              <button 
+                onClick={() => setIsShortcutsModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-50 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-3.5">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-slate-600">Quickly Add 100 Rows</span>
+                <span className="flex items-center gap-1">
+                  <kbd className="px-2 py-1 bg-slate-100 border border-slate-200 rounded text-xs font-bold text-slate-500">Alt</kbd>
+                  <span className="text-slate-400 font-bold">+</span>
+                  <kbd className="px-2 py-1 bg-slate-100 border border-slate-200 rounded text-xs font-bold text-slate-500">N</kbd>
+                </span>
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-slate-600">Execute Search All Rows</span>
+                <span className="flex items-center gap-1">
+                  <kbd className="px-2 py-1 bg-slate-100 border border-slate-200 rounded text-xs font-bold text-slate-500">Alt</kbd>
+                  <span className="text-slate-400 font-bold">+</span>
+                  <kbd className="px-2 py-1 bg-slate-100 border border-slate-200 rounded text-xs font-bold text-slate-500">S</kbd>
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-slate-600">Clear All Search Inputs</span>
+                <span className="flex items-center gap-1">
+                  <kbd className="px-2 py-1 bg-slate-100 border border-slate-200 rounded text-xs font-bold text-slate-500">Alt</kbd>
+                  <span className="text-slate-400 font-bold">+</span>
+                  <kbd className="px-2 py-1 bg-slate-100 border border-slate-200 rounded text-xs font-bold text-slate-500">C</kbd>
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-slate-600">Close Overlay / Cancel Search</span>
+                <span className="flex items-center gap-1">
+                  <kbd className="px-2.5 py-1 bg-slate-100 border border-slate-200 rounded text-xs font-bold text-slate-500">Esc</kbd>
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-5 pt-4 border-t border-slate-100 bg-indigo-50/40 p-3.5 rounded-xl">
+              <p className="text-[11px] text-indigo-700 leading-relaxed flex items-start gap-1.5 font-medium">
+                <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                These hotkeys function globally unless you are actively typing inside a search text box, which prevents interruptions.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Flagged Warning Remarks Auditor Modal */}
+      {isRemarksInspectorOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[80] flex justify-center items-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-100 flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
+            <div className="bg-indigo-700 p-6 text-white flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-2.5">
+                <AlertTriangle className="w-5 h-5 text-amber-300" />
+                <div>
+                  <h3 className="text-lg font-black leading-tight">Critical Warnings Audit</h3>
+                  <p className="text-xs text-indigo-100">Reviewing warning comments from database</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsRemarksInspectorOpen(false)}
+                className="text-indigo-200 hover:text-white p-1.5 rounded-full hover:bg-white/10 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-b border-slate-100 flex gap-3 shrink-0">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input 
+                  type="text"
+                  placeholder="Filter warning comments by examiner or content..."
+                  className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={remarksSearchQuery}
+                  onChange={e => setRemarksSearchQuery(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 divide-y divide-slate-100">
+              {(() => {
+                const query = remarksSearchQuery.toLowerCase().trim();
+                const matched = localData.filter(row => {
+                  const name = String(row[1] || '').toLowerCase();
+                  const tpin = String(row[3] || '').toLowerCase();
+                  const remark = String(row[92] || '').toLowerCase();
+                  const rmVal = String(row[7] || '');
+                  const rmNum = parseInt(rmVal.match(/\d+/)?.[0] || '0', 10);
+                  
+                  const isFlagged = rmNum >= 4 || (remark.length > 0 && rmNum > 0);
+                  if (!isFlagged) return false;
+                  
+                  return !query || name.includes(query) || tpin.includes(query) || remark.includes(query);
+                });
+
+                if (matched.length === 0) {
+                  return (
+                    <div className="text-center py-12">
+                      <AlertTriangle className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      <p className="text-sm font-semibold text-slate-500">No warning records found matching criteria</p>
+                    </div>
+                  );
+                }
+
+                return matched.map((r, index) => {
+                  const name = String(r[1] || '').trim();
+                  const tpin = String(r[3] || '').trim();
+                  const rm = String(r[7] || '').trim();
+                  const body = String(r[92] || '').trim();
+                  const remarkedBy = String(r[8] || '').trim();
+                  const mobile = padMobile(r[9]);
+
+                  return (
+                    <div 
+                      key={tpin + index} 
+                      onClick={() => {
+                        handleSelectGlobalSuggestion({ name, tpin, mobile, raw: r });
+                        setIsRemarksInspectorOpen(false);
+                      }}
+                      className="py-4 first:pt-0 last:pb-0 cursor-pointer hover:bg-rose-50/30 px-3 -mx-3 rounded-xl transition-all flex flex-col gap-1"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="text-sm font-black text-slate-800">{name}</span>
+                          <span className="ml-2 text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-black font-mono">TPIN: {tpin}</span>
+                        </div>
+                        <span className="text-xs bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full font-bold uppercase tracking-tight">
+                          RM Level: {rm}
+                        </span>
+                      </div>
+                      <p className="text-[13px] text-slate-600 leading-relaxed font-medium bg-rose-50/20 p-2.5 rounded-lg border border-rose-100/30">
+                        {body || 'No warning explanation registered.'}
+                      </p>
+                      {remarkedBy && (
+                        <div className="text-[10px] text-slate-400 font-bold flex items-center gap-1 mt-1">
+                          <Users className="w-3 h-3" /> Flagged By: {remarkedBy}
+                        </div>
+                      )}
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+            
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end shrink-0">
+              <button 
+                onClick={() => setIsRemarksInspectorOpen(false)}
+                className="bg-indigo-600 text-white font-bold px-5 py-2 rounded-xl text-xs hover:bg-indigo-700 transition-colors cursor-pointer"
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Interactive Batch Explorer Modal */}
+      {selectedBatchForExplorer && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[80] flex justify-center items-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-3xl overflow-hidden border border-slate-100 flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-indigo-700 to-indigo-800 p-6 text-white flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="bg-white/10 p-2.5 rounded-xl border border-white/10">
+                  <BookOpen className="w-6 h-6 text-indigo-200" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black leading-tight flex items-center gap-2">
+                    Batch Explorer
+                    <span className="bg-indigo-500/30 text-indigo-100 px-2.5 py-0.5 rounded-full border border-indigo-400/20 text-xs font-black">
+                      HSC {selectedBatchForExplorer}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-indigo-200">Reviewing and searching examiners from this specific academic batch</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setSelectedBatchForExplorer(null)}
+                className="text-indigo-200 hover:text-white p-1.5 rounded-full hover:bg-white/10 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Calculations & Batch Stats */}
+            {(() => {
+              const batchRows = localData.filter(row => String(row[6] || '').trim() === selectedBatchForExplorer);
+              const totalCount = batchRows.length;
+              
+              let flaggedCount = 0;
+              let totalScored = 0;
+              let totalPassed = 0;
+              
+              const scoreCols = [61, 64, 67, 70, 73, 76, 79];
+              const curThresholds = thresholds || THRESHOLDS;
+              const thresholdVals = [
+                curThresholds.english || THRESHOLDS.english,
+                curThresholds.bangla || THRESHOLDS.bangla,
+                curThresholds.physics || THRESHOLDS.physics,
+                curThresholds.chemistry || THRESHOLDS.chemistry,
+                curThresholds.math || THRESHOLDS.math,
+                curThresholds.biology || THRESHOLDS.biology,
+                curThresholds.ict || THRESHOLDS.ict
+              ];
+
+              for (let i = 0; i < totalCount; i++) {
+                const row = batchRows[i];
+                const rmVal = String(row[7] || '');
+                const rmNum = parseInt(rmVal.match(/\d+/)?.[0] || '0', 10);
+                const remarkRaw = String(row[92] || '').trim();
+                if (rmNum >= 4 || (remarkRaw.length > 0 && rmNum > 0)) {
+                  flaggedCount++;
+                }
+
+                for (let s = 0; s < scoreCols.length; s++) {
+                  const scoreIdx = scoreCols[s];
+                  const rawScore = String(row[scoreIdx] || '').trim();
+                  if (rawScore !== '' && rawScore !== '—') {
+                    totalScored++;
+                    let scoreNum = 0;
+                    if (rawScore.includes('/')) {
+                      const parts = rawScore.split('/');
+                      const achieved = parseFloat(parts[0]);
+                      const outOf = parseFloat(parts[1]);
+                      if (outOf > 0) {
+                        scoreNum = Math.round((achieved / outOf) * 100);
+                      }
+                    } else {
+                      scoreNum = parseFloat(rawScore);
+                    }
+                    if (scoreNum >= thresholdVals[s]) {
+                      totalPassed++;
+                    }
+                  }
+                }
+              }
+
+              const passRate = totalScored > 0 ? Math.round((totalPassed / totalScored) * 100) : 0;
+
+              // Filtered list of examiners
+              const query = batchSearchQuery.toLowerCase().trim();
+              const filteredBatchRows = batchRows.filter(row => {
+                const name = String(row[1] || '').toLowerCase();
+                const tpin = String(row[3] || '').toLowerCase();
+                const mobile = String(row[9] || '').replace(/\.0$/, '');
+                const altMobile = String(row[10] || '').replace(/\.0$/, '');
+                const inst = String(row[4] || '').toLowerCase();
+
+                return !query || 
+                  name.includes(query) || 
+                  tpin.includes(query) || 
+                  mobile.includes(query) || 
+                  altMobile.includes(query) ||
+                  inst.includes(query);
+              });
+
+              return (
+                <>
+                  {/* Batch Summary Badges */}
+                  <div className="grid grid-cols-3 gap-4 p-5 bg-slate-50 border-b border-slate-100 shrink-0">
+                    <div className="bg-white p-3.5 rounded-2xl border border-slate-200/60 shadow-sm">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-sans">Total Examiners</span>
+                      <span className="text-2xl font-black text-slate-900 leading-tight">
+                        {totalCount.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="bg-white p-3.5 rounded-2xl border border-slate-200/60 shadow-sm">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-sans font-sans">Batch Pass Rate</span>
+                      <span className="text-2xl font-black text-emerald-600 leading-tight">
+                        {passRate}%
+                      </span>
+                    </div>
+                    <div className="bg-white p-3.5 rounded-2xl border border-slate-200/60 shadow-sm">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-sans">Flagged Warnings</span>
+                      <span className={`text-2xl font-black leading-tight ${flaggedCount > 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                        {flaggedCount}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Search bar inside modal */}
+                  <div className="p-4 border-b border-slate-100 flex gap-3 shrink-0 bg-white">
+                    <div className="relative flex-1">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input 
+                        type="text"
+                        placeholder={`Search within Batch ${selectedBatchForExplorer} (name, TPIN, mobile, or college)...`}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
+                        value={batchSearchQuery}
+                        onChange={e => setBatchSearchQuery(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* List of examiners */}
+                  <div className="flex-1 overflow-y-auto p-6 divide-y divide-slate-100">
+                    {filteredBatchRows.length === 0 ? (
+                      <div className="text-center py-12">
+                        <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                        <p className="text-sm font-semibold text-slate-500">No batch records found matching your criteria</p>
+                      </div>
+                    ) : (
+                      filteredBatchRows.map((r, index) => {
+                        const name = String(r[1] || '').trim();
+                        const tpin = String(r[3] || '').trim();
+                        const inst = String(r[4] || '').trim();
+                        const dept = String(r[5] || '').trim();
+                        const mobile = padMobile(r[9]);
+
+                        return (
+                          <div 
+                            key={tpin + index} 
+                            onClick={() => {
+                              handleSelectGlobalSuggestion({ name, tpin, mobile, raw: r });
+                              setSelectedBatchForExplorer(null);
+                            }}
+                            className="py-3 hover:bg-indigo-50/40 px-3 -mx-3 rounded-xl transition-all cursor-pointer flex justify-between items-center group"
+                          >
+                            <div className="flex-1 min-w-0 pr-4">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-bold text-slate-800 truncate">{name}</span>
+                                <span className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-bold font-mono">TPIN: {tpin}</span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 truncate mt-0.5 font-medium">
+                                {dept} • {inst}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0">
+                              <span className="text-xs text-slate-400 font-mono font-semibold hidden sm:inline">{mobile}</span>
+                              <span className="text-[11px] text-indigo-600 font-bold group-hover:underline flex items-center gap-0.5 bg-indigo-50 px-2 py-1 rounded-lg">
+                                View Profile
+                                <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end shrink-0">
+              <button 
+                onClick={() => setSelectedBatchForExplorer(null)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-5 py-2 rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Close Explorer
+              </button>
+            </div>
           </div>
         </div>
       )}
