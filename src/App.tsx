@@ -1188,9 +1188,9 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans selection:bg-indigo-100 selection:text-indigo-900 flex flex-col relative">
       <header className="bg-indigo-700 text-white sticky top-0 z-40 shadow-md">
-        <div className="max-w-[1600px] mx-auto px-4 md:px-6 py-2 flex flex-wrap md:flex-nowrap items-center justify-between gap-3 md:gap-4">
-          <div className="flex items-center gap-2 sm:gap-4 flex-wrap sm:flex-nowrap">
-            <div className="bg-white/10 p-1.5 sm:p-2 rounded-lg backdrop-blur-sm border border-white/5 flex items-center justify-center shrink-0">
+        <div className="max-w-[1600px] mx-auto px-4 md:px-6 py-2.5 flex flex-wrap lg:flex-nowrap items-center justify-between gap-3 lg:gap-4">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+            <div className="bg-white/10 p-1.5 rounded-lg backdrop-blur-sm border border-white/5 flex items-center justify-center shrink-0">
               <FileSpreadsheet className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-50" />
             </div>
             <h1 className="text-sm sm:text-base md:text-[1.1rem] font-semibold tracking-wide shrink-0 truncate max-w-[180px] sm:max-w-none">Examiner Assessment Checker</h1>
@@ -1207,35 +1207,35 @@ export default function App() {
               <LayoutGrid className="w-3 h-3 opacity-70" />
               {isSyncing ? 'Syncing...' : (connectionStatus === 'connected' ? (
                 <>
-                  <span className="hidden lg:inline">{isWorkingHours() ? 'Instant Mode Active' : 'Ultra Search Active'}</span>
-                  <span className="inline lg:hidden">{isWorkingHours() ? 'Instant Mode' : 'Ultra Search'}</span>
+                  <span className="hidden xl:inline">{isWorkingHours() ? 'Instant Mode Active' : 'Ultra Search Active'}</span>
+                  <span className="inline xl:hidden">{isWorkingHours() ? 'Instant Mode' : 'Ultra Search'}</span>
                 </>
               ) : 
                connectionStatus === 'connecting' ? 'Connecting...' : 
                'Connection Error')}
             </div>
             {lastSyncTime > 0 && !isSyncing && (
-              <div className="text-[10px] text-emerald-300 font-medium ml-1 sm:ml-2 flex items-center gap-1.5 bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
+              <div className="text-[10px] text-emerald-300 font-medium ml-1 flex items-center gap-1.5 bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
                 <span className="relative flex h-1.5 w-1.5 shrink-0">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
                 </span>
-                <span className="hidden lg:inline">Auto Live Sync: Synced {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                <span className="inline lg:hidden">Synced {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="hidden xl:inline">Auto Live Sync: Synced {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="inline xl:hidden">Synced {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               </div>
             )}
           </div>
           
-          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-auto lg:ml-0">
             {dbStats.rowCount !== null && (
-              <div className="text-[10px] sm:text-[11px] font-bold text-indigo-200 uppercase tracking-wider bg-indigo-800/50 px-2 py-0.5 sm:py-1 rounded border border-indigo-600/30 shrink-0">
+              <div className="text-[10px] sm:text-[11px] font-bold text-indigo-200 uppercase tracking-wider bg-indigo-800/50 px-2.5 py-1 rounded border border-indigo-600/30 shrink-0">
                 {dbStats.rowCount.toLocaleString()} Records
               </div>
             )}
             <div className="relative group shrink">
               <Search className="w-3.5 h-3.5 text-indigo-300 absolute left-2.5 top-1/2 -translate-y-1/2 transition-colors group-focus-within:text-indigo-200" />
               <input 
-                className="bg-indigo-800/60 border border-indigo-600/50 text-xs sm:text-sm text-white placeholder-indigo-300 rounded-lg pl-8 pr-4 py-1.5 sm:py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-indigo-800 transition-all w-36 xs:w-44 sm:w-56 md:w-64 lg:w-80 shadow-inner"
+                className="bg-indigo-800/60 border border-indigo-600/50 text-xs sm:text-sm text-white placeholder-indigo-300 rounded-lg pl-8 pr-4 py-1.5 sm:py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-indigo-800 transition-all w-28 xs:w-32 sm:w-40 md:w-48 lg:w-56 shadow-inner"
                 placeholder="Search T-PIN, mobile..."
                 value={globalSearch}
                 onChange={e => handleGlobalSearchChange(e.target.value)}
