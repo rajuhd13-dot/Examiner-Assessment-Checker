@@ -1188,13 +1188,13 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans selection:bg-indigo-100 selection:text-indigo-900 flex flex-col relative">
       <header className="bg-indigo-700 text-white sticky top-0 z-40 shadow-md">
-        <div className="max-w-[1600px] mx-auto px-6 py-2 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="bg-white/10 p-2 rounded-lg backdrop-blur-sm border border-white/5 flex items-center justify-center">
-              <FileSpreadsheet className="w-5 h-5 text-indigo-50" />
+        <div className="max-w-[1600px] mx-auto px-4 md:px-6 py-2 flex flex-wrap md:flex-nowrap items-center justify-between gap-3 md:gap-4">
+          <div className="flex items-center gap-2 sm:gap-4 flex-wrap sm:flex-nowrap">
+            <div className="bg-white/10 p-1.5 sm:p-2 rounded-lg backdrop-blur-sm border border-white/5 flex items-center justify-center shrink-0">
+              <FileSpreadsheet className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-50" />
             </div>
-            <h1 className="text-[1.1rem] font-semibold tracking-wide">Examiner Assessment Checker</h1>
-            <div className={`hidden sm:flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+            <h1 className="text-sm sm:text-base md:text-[1.1rem] font-semibold tracking-wide shrink-0 truncate max-w-[180px] sm:max-w-none">Examiner Assessment Checker</h1>
+            <div className={`hidden sm:flex items-center gap-1.5 px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium border transition-colors shrink-0 ${
               connectionStatus === 'connected' ? 'bg-emerald-500/15 text-emerald-100 border-emerald-500/30' :
               connectionStatus === 'connecting' ? 'bg-amber-500/15 text-amber-100 border-amber-500/30' :
               'bg-rose-500/15 text-rose-100 border-rose-500/30 cursor-pointer hover:bg-rose-500/25'
@@ -1205,32 +1205,38 @@ export default function App() {
                 'bg-rose-400 font-bold'
               }`} />
               <LayoutGrid className="w-3 h-3 opacity-70" />
-              {isSyncing ? 'Syncing Store...' : (connectionStatus === 'connected' ? (isWorkingHours() ? 'Instant Mode Active' : 'Ultra Search Active') : 
+              {isSyncing ? 'Syncing...' : (connectionStatus === 'connected' ? (
+                <>
+                  <span className="hidden lg:inline">{isWorkingHours() ? 'Instant Mode Active' : 'Ultra Search Active'}</span>
+                  <span className="inline lg:hidden">{isWorkingHours() ? 'Instant Mode' : 'Ultra Search'}</span>
+                </>
+              ) : 
                connectionStatus === 'connecting' ? 'Connecting...' : 
-               'Connection Error (Setup API)')}
+               'Connection Error')}
             </div>
             {lastSyncTime > 0 && !isSyncing && (
-              <div className="text-[10px] text-emerald-300 font-medium ml-2 flex items-center gap-1.5 bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-500/20">
+              <div className="text-[10px] text-emerald-300 font-medium ml-1 sm:ml-2 flex items-center gap-1.5 bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
                 <span className="relative flex h-1.5 w-1.5 shrink-0">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
                 </span>
-                <span>Auto Live Sync: Synced {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="hidden lg:inline">Auto Live Sync: Synced {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="inline lg:hidden">Synced {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               </div>
             )}
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
             {dbStats.rowCount !== null && (
-              <div className="text-[11px] font-bold text-indigo-200 uppercase tracking-wider bg-indigo-800/50 px-2 py-1 rounded border border-indigo-600/30">
+              <div className="text-[10px] sm:text-[11px] font-bold text-indigo-200 uppercase tracking-wider bg-indigo-800/50 px-2 py-0.5 sm:py-1 rounded border border-indigo-600/30 shrink-0">
                 {dbStats.rowCount.toLocaleString()} Records
               </div>
             )}
-            <div className="relative group">
-              <Search className="w-4 h-4 text-indigo-300 absolute left-3 top-1/2 -translate-y-1/2 transition-colors group-focus-within:text-indigo-200" />
+            <div className="relative group shrink">
+              <Search className="w-3.5 h-3.5 text-indigo-300 absolute left-2.5 top-1/2 -translate-y-1/2 transition-colors group-focus-within:text-indigo-200" />
               <input 
-                className="bg-indigo-800/60 border border-indigo-600/50 text-sm text-white placeholder-indigo-300 rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-indigo-800 transition-all w-64 md:w-80 shadow-inner"
-                placeholder="Search T-PIN, mobile, or name..."
+                className="bg-indigo-800/60 border border-indigo-600/50 text-xs sm:text-sm text-white placeholder-indigo-300 rounded-lg pl-8 pr-4 py-1.5 sm:py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-indigo-800 transition-all w-36 xs:w-44 sm:w-56 md:w-64 lg:w-80 shadow-inner"
+                placeholder="Search T-PIN, mobile..."
                 value={globalSearch}
                 onChange={e => handleGlobalSearchChange(e.target.value)}
                 onKeyDown={handleGlobalSearch}
@@ -1379,29 +1385,12 @@ export default function App() {
               <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
               {isSyncing ? 'Syncing...' : 'Sync Database'}
             </button>
-            {localData && localData.length > 0 && (
-              <button 
-                onClick={clearLocalCache}
-                className="flex items-center gap-1.5 bg-white border border-slate-200 shadow-sm text-rose-600 px-3 py-1.5 rounded-xl text-sm font-semibold hover:bg-rose-50 transition-all hover:shadow cursor-pointer"
-                title="Clear cached data"
-              >
-                Clear Cache
-              </button>
-            )}
             <button 
               onClick={() => setIsColModalOpen(true)}
               className="flex items-center gap-2 bg-white border border-slate-200 shadow-sm text-slate-600 px-3 py-1.5 rounded-xl text-sm font-semibold hover:bg-slate-50 hover:text-indigo-600 transition-all hover:shadow cursor-pointer"
             >
               <LayoutGrid className="w-4 h-4" />
               Columns
-            </button>
-            <button 
-              onClick={() => setIsShortcutsModalOpen(true)}
-              className="flex items-center gap-2 bg-white border border-slate-200 shadow-sm text-slate-600 px-3 py-1.5 rounded-xl text-sm font-semibold hover:bg-slate-50 hover:text-indigo-600 transition-all hover:shadow cursor-pointer"
-              title="View Keyboard Shortcuts Guide"
-            >
-              <Keyboard className="w-4 h-4" />
-              Shortcuts
             </button>
             <button 
               onClick={() => setShowStatsDashboard(!showStatsDashboard)}
