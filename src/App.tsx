@@ -269,18 +269,24 @@ export default function App() {
   const [selectedExaminer, setSelectedExaminer] = useState<Examiner | null>(null);
 
   // Helper to re-run connection check and SYNC
-  const checkConnection = async (targetUrl?: string, forceManual?: boolean) => {
+  const checkConnection = async (targetUrl?: string, forceManual?: boolean, isSilent?: boolean) => {
     const scriptBaseUrl = targetUrl || getScriptUrl();
     
+    // Check if cache exists in localStorage or in memory
+    const hasCache = !!localStorage.getItem('examiner_local_data') || (localData && localData.length > 0);
+    const isActuallySilent = isSilent && hasCache;
+
     // FAST CONNECT: If we have cached data, we are "connected" instantly (0-1 seconds)
-    if (localData && localData.length > 0) {
+    if (hasCache) {
       setConnectionStatus('connected');
     } else {
       setConnectionStatus('connecting');
     }
 
-    setLastError(null);
-    setIsSyncing(true);
+    if (!isActuallySilent) {
+      setLastError(null);
+      setIsSyncing(true);
+    }
     
     try {
       const separator = scriptBaseUrl.includes('?') ? '&' : '?';
@@ -379,10 +385,12 @@ export default function App() {
         errMsg = "Network Error (CORS or blocked request). Verify your script is deployed as Web App for 'Anyone'.";
       }
 
-      if (!localData || localData.length === 0) {
+      if (!hasCache) {
         setLastError(errMsg);
         setConnectionStatus('error');
-        setIsErrorModalOpen(true);
+        if (!isActuallySilent) {
+          setIsErrorModalOpen(true);
+        }
       } else {
         console.warn("Silent sync failed, utilizing offline cache:", errMsg);
         if (forceManual) {
@@ -390,7 +398,9 @@ export default function App() {
         }
       }
     } finally {
-      setIsSyncing(false);
+      if (!isActuallySilent) {
+        setIsSyncing(false);
+      }
     }
   };
 
@@ -407,7 +417,7 @@ export default function App() {
     }
   };
 
-  // Init
+  // Init and periodic background sync
   useEffect(() => {
     const initialRows = Array.from({ length: 9 }).map(() => ({
       id: crypto.randomUUID(),
@@ -416,7 +426,33 @@ export default function App() {
       data: null
     }));
     setRows(initialRows);
-    checkConnection();
+    
+    // Check if cache exists in localStorage or memory
+    const hasCache = !!localStorage.getItem('examiner_local_data');
+    
+    // On mount, perform silent background sync if cached data is present.
+    // This makes the app load INSTANTLY into "Instant Mode Active" state.
+    // If no cache exists, do a normal foreground load.
+    if (hasCache) {
+      checkConnection(undefined, false, true);
+    } else {
+      checkConnection();
+    }
+
+    // Auto-refresh in the background every 5 minutes during active hours (8 AM to 11 PM)
+    const intervalId = setInterval(() => {
+      const now = new Date();
+      const hr = now.getHours();
+      const withinActiveHours = hr >= 8 && hr < 23; // 8 AM to 11 PM
+      
+      const hasCacheNow = !!localStorage.getItem('examiner_local_data');
+      if (withinActiveHours && hasCacheNow) {
+        console.log("Auto background sync: updating database...");
+        checkConnection(undefined, false, true);
+      }
+    }, 5 * 60 * 1000); // 5 minutes
+
+    return () => clearInterval(intervalId);
   }, []);
 
   const resetToDefault = () => {
@@ -685,7 +721,7 @@ export default function App() {
   const isWorkingHours = () => {
     const now = new Date();
     const hr = now.getHours();
-    return hr >= 8 && hr < 22; // 8 AM to 10 PM
+    return hr >= 8 && hr < 23; // 8 AM to 11 PM
   };
 
   const getNotificationMessage = (examiner: Examiner) => {
