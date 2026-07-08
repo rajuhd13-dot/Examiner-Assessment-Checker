@@ -1160,7 +1160,7 @@ export default function App() {
     return hr >= 8 && hr < 23; // 8 AM to 11 PM
   };
 
-  const FIXED_MSG = "Greetings. I am contacting you on behalf of the Exam Script Evaluation Department, Motijheel.";
+  const FIXED_MSG = "Greetings. I am contacting you on behalf of the Exam Script Evaluation Department.";
 
   const getNotificationMessage = (examiner: Examiner) => {
     const subjects = [
@@ -1592,7 +1592,29 @@ export default function App() {
                         if (col.isScore) {
                            cellContent = getScoreDisplay(val as SubjectStats);
                         } else {
-                           cellContent = <span className={`text-[13px] whitespace-nowrap ${index % 2 === 0 ? 'text-slate-700' : 'text-slate-800'}`}>{val as any}</span>;
+                           cellContent = (
+                             <div className="flex items-center gap-1.5">
+                               <span className={`text-[13px] whitespace-nowrap ${index % 2 === 0 ? 'text-slate-700' : 'text-slate-800'}`}>{val as any}</span>
+                               {['mobile', 'alternate', 'nagad'].includes(col.key) && val && (
+                                 <>
+                                   <button 
+                                     onClick={() => sendWhatsApp({ ...row.data, mobile: val } as Examiner, true)}
+                                     className="p-0.5 text-emerald-600 hover:bg-emerald-100 rounded transition-colors"
+                                     title="Notify via WhatsApp"
+                                   >
+                                     <MessageSquare className="w-3.5 h-3.5" />
+                                   </button>
+                                   <button 
+                                     onClick={() => sendTelegram({ ...row.data, mobile: val } as Examiner, true)}
+                                     className="p-0.5 text-sky-600 hover:bg-sky-100 rounded transition-colors"
+                                     title="Notify via Telegram"
+                                   >
+                                     <Send className="w-3.5 h-3.5" />
+                                   </button>
+                                 </>
+                               )}
+                             </div>
+                           );
                         }
                       } else if (row.status === 'loading') {
                           cellContent = <div className="h-4 w-12 bg-slate-100 rounded animate-pulse mx-auto" />;
@@ -1614,20 +1636,6 @@ export default function App() {
                              title="View Full Profile"
                            >
                              <LayoutGrid className="w-4 h-4" />
-                           </button>
-                           <button 
-                             onClick={() => sendWhatsApp(row.data!, true)}
-                             className="bg-emerald-50 text-emerald-600 p-1.5 rounded-md hover:bg-emerald-100 transition-colors border border-emerald-200/50"
-                             title="Notify via WhatsApp"
-                           >
-                             <MessageSquare className="w-4 h-4" />
-                           </button>
-                           <button 
-                             onClick={() => sendTelegram(row.data!, true)}
-                             className="bg-sky-50 text-sky-600 p-1.5 rounded-md hover:bg-sky-100 transition-colors border border-sky-200/50"
-                             title="Notify via Telegram"
-                           >
-                             <Send className="w-4 h-4" />
                            </button>
                          </div>
                        )}
@@ -1834,11 +1842,15 @@ export default function App() {
                       <div className="space-y-4">
                         <div className="flex flex-col">
                            <span className="text-[10px] uppercase text-slate-400 font-bold">Mobile Number</span>
-                           <span className="text-sm font-semibold text-slate-700">{selectedExaminer.mobile}</span>
+                           <div className="flex items-center gap-2">
+                             <span className="text-sm font-semibold text-slate-700">{selectedExaminer.mobile}</span>
+                           </div>
                         </div>
                         <div className="flex flex-col">
                            <span className="text-[10px] uppercase text-slate-400 font-bold">Nagad Number</span>
-                           <span className="text-sm font-semibold text-slate-700">{selectedExaminer.nagad}</span>
+                           <div className="flex items-center gap-2">
+                             <span className="text-sm font-semibold text-slate-700">{selectedExaminer.nagad}</span>
+                           </div>
                         </div>
                         <div className="flex flex-col">
                            <span className="text-[10px] uppercase text-slate-400 font-bold">Email Address</span>
