@@ -484,6 +484,26 @@ export default function App() {
     };
   }, [localData, thresholds, dbStats.rowCount]);
 
+  // Dynamic warning count based on active search inputs in table rows
+  const activeWarningsCount = React.useMemo(() => {
+    const hasSearchedRows = rows.some(r => r.inputValue.trim() !== '');
+    if (!hasSearchedRows) {
+      return statsSummary.flagged;
+    }
+    return rows.reduce((acc, row) => {
+      if (row.status === 'found' && row.data) {
+        const rmVal = String(row.data.rm || '');
+        const rmNum = parseInt(rmVal.match(/\d+/)?.[0] || '0', 10);
+        const hasRemarkBody = String(row.data.remark?.body || '').trim().length > 0;
+        const isFlagged = rmNum >= 4 || (hasRemarkBody && rmNum > 0);
+        if (isFlagged) {
+          return acc + 1;
+        }
+      }
+      return acc;
+    }, 0);
+  }, [rows, statsSummary.flagged]);
+
   const selectSuggestion = (rowId: string, sug: { name: string; tpin: string; mobile: string }) => {
     setRows(prev => prev.map(r => r.id === rowId ? { ...r, inputValue: sug.tpin, status: 'idle', data: null } : r));
     setFocusedRowId(null);
@@ -1140,6 +1160,8 @@ export default function App() {
     return hr >= 8 && hr < 23; // 8 AM to 11 PM
   };
 
+  const FIXED_MSG = "Greetings. I am contacting you on behalf of the Exam Script Evaluation Department, Motijheel.";
+
   const getNotificationMessage = (examiner: Examiner) => {
     const subjects = [
       { name: 'English', ...examiner.english },
@@ -1170,15 +1192,15 @@ export default function App() {
     }
   };
 
-  const sendWhatsApp = (examiner: Examiner) => {
-    const msg = encodeURIComponent(getNotificationMessage(examiner));
+  const sendWhatsApp = (examiner: Examiner, useFixedMessage = false) => {
+    const msg = encodeURIComponent(useFixedMessage ? FIXED_MSG : getNotificationMessage(examiner));
     const phone = examiner.mobile.replace(/\D/g, '');
     const url = `https://wa.me/${phone.startsWith('88') ? phone : '88' + phone}?text=${msg}`;
     window.open(url, '_blank');
   };
 
-  const sendTelegram = (examiner: Examiner) => {
-    const msg = encodeURIComponent(getNotificationMessage(examiner));
+  const sendTelegram = (examiner: Examiner, useFixedMessage = false) => {
+    const msg = encodeURIComponent(useFixedMessage ? FIXED_MSG : getNotificationMessage(examiner));
     const phone = examiner.mobile.replace(/\D/g, '');
     const formattedPhone = phone.startsWith('88') ? phone : '88' + phone;
     const url = `https://t.me/+${formattedPhone}?text=${msg}`;
@@ -1286,7 +1308,6 @@ export default function App() {
             <div className="bg-white border border-slate-200/80 p-5 rounded-2xl shadow-sm flex items-center justify-between group hover:border-indigo-300 transition-all duration-300 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50/30 rounded-full translate-x-10 -translate-y-10 group-hover:scale-110 transition-transform" />
               <div className="space-y-1 relative z-10">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Local Database</span>
                 <span className="text-3xl font-black text-slate-900 leading-tight">
                   {statsSummary.total ? statsSummary.total.toLocaleString() : '0'}
                 </span>
@@ -1295,7 +1316,7 @@ export default function App() {
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                   </span>
-                  IndexedDB Active
+                  Index Data Active
                 </span>
               </div>
               <div className="bg-indigo-50 p-3.5 rounded-xl text-indigo-600 relative z-10 group-hover:bg-indigo-600 group-hover:text-white transition-colors duration-300">
@@ -1321,23 +1342,23 @@ export default function App() {
             {/* Widget 3: Flagged Remarks */}
             <div 
               onClick={() => {
-                if (statsSummary.flagged > 0) {
+                if (activeWarningsCount > 0) {
                   setIsRemarksInspectorOpen(true);
                 }
               }}
-              className={`bg-white border border-slate-200/80 p-5 rounded-2xl shadow-sm flex items-center justify-between group hover:border-rose-300 transition-all duration-300 relative overflow-hidden ${statsSummary.flagged > 0 ? 'cursor-pointer hover:shadow-md' : ''}`}
+              className={`bg-white border border-slate-200/80 p-5 rounded-2xl shadow-sm flex items-center justify-between group hover:border-rose-300 transition-all duration-300 relative overflow-hidden ${activeWarningsCount > 0 ? 'cursor-pointer hover:shadow-md' : ''}`}
             >
               <div className="absolute top-0 right-0 w-32 h-32 bg-rose-50/30 rounded-full translate-x-10 -translate-y-10 group-hover:scale-110 transition-transform" />
               <div className="space-y-1 relative z-10">
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Critical Warnings</span>
                 <span className="text-3xl font-black text-rose-600 leading-tight">
-                  {statsSummary.flagged}
+                  {activeWarningsCount}
                 </span>
                 <span className="text-xs text-rose-500 font-bold flex items-center gap-1 hover:underline">
-                  {statsSummary.flagged > 0 ? '⚠️ Click to inspect remarks' : 'No warnings recorded'}
+                  {activeWarningsCount > 0 ? '⚠️ Click to inspect remarks' : 'No warnings recorded'}
                 </span>
               </div>
-              <div className={`p-3.5 rounded-xl relative z-10 transition-colors duration-300 ${statsSummary.flagged > 0 ? 'bg-rose-50 text-rose-600 group-hover:bg-rose-600 group-hover:text-white' : 'bg-slate-50 text-slate-400'}`}>
+              <div className={`p-3.5 rounded-xl relative z-10 transition-colors duration-300 ${activeWarningsCount > 0 ? 'bg-rose-50 text-rose-600 group-hover:bg-rose-600 group-hover:text-white' : 'bg-slate-50 text-slate-400'}`}>
                 <AlertTriangle className="w-6 h-6" />
               </div>
             </div>
@@ -1347,7 +1368,17 @@ export default function App() {
               <div className="flex justify-between items-center mb-2">
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Primary Batches</span>
                 {statsSummary.batches.length > 0 && (
-                  <span className="text-[9px] text-indigo-500 font-bold bg-indigo-50 px-1.5 py-0.5 rounded-full animate-pulse">Click to Explore</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedBatchForExplorer(statsSummary.batches[0].name);
+                      setBatchSearchQuery('');
+                    }}
+                    className="text-[9px] text-indigo-600 font-black bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-0.5 rounded-full animate-pulse transition-all cursor-pointer active:scale-95 z-20 relative"
+                    title="Click to explore the primary batch"
+                  >
+                    Click to Explore
+                  </button>
                 )}
               </div>
               <div className="flex flex-wrap gap-1.5 z-10 relative">
@@ -1585,14 +1616,14 @@ export default function App() {
                              <LayoutGrid className="w-4 h-4" />
                            </button>
                            <button 
-                             onClick={() => sendWhatsApp(row.data!)}
+                             onClick={() => sendWhatsApp(row.data!, true)}
                              className="bg-emerald-50 text-emerald-600 p-1.5 rounded-md hover:bg-emerald-100 transition-colors border border-emerald-200/50"
                              title="Notify via WhatsApp"
                            >
                              <MessageSquare className="w-4 h-4" />
                            </button>
                            <button 
-                             onClick={() => sendTelegram(row.data!)}
+                             onClick={() => sendTelegram(row.data!, true)}
                              className="bg-sky-50 text-sky-600 p-1.5 rounded-md hover:bg-sky-100 transition-colors border border-sky-200/50"
                              title="Notify via Telegram"
                            >
@@ -1907,14 +1938,14 @@ export default function App() {
                 </div>
                  <div className="flex items-center gap-3">
                     <button 
-                       onClick={() => sendWhatsApp(selectedExaminer!)}
+                       onClick={() => sendWhatsApp(selectedExaminer!, false)}
                        className="flex items-center gap-2 bg-emerald-600 text-white font-bold px-5 py-2.5 rounded-xl hover:bg-emerald-700 transition-all shadow-md active:scale-95"
                     >
                        <MessageSquare className="w-4 h-4" />
                        WhatsApp
                     </button>
                     <button 
-                       onClick={() => sendTelegram(selectedExaminer!)}
+                       onClick={() => sendTelegram(selectedExaminer!, false)}
                        className="flex items-center gap-2 bg-sky-500 text-white font-bold px-5 py-2.5 rounded-xl hover:bg-sky-600 transition-all shadow-md active:scale-95"
                     >
                        <Send className="w-4 h-4" />
@@ -2031,6 +2062,11 @@ export default function App() {
             <div className="flex-1 overflow-y-auto p-6 divide-y divide-slate-100">
               {(() => {
                 const query = remarksSearchQuery.toLowerCase().trim();
+                const activeFoundSls = rows
+                  .filter(r => r.status === 'found' && r.data)
+                  .map(r => String(r.data!.sl).trim());
+                const hasSearchedRows = rows.some(r => r.inputValue.trim() !== '');
+
                 const matched = localData.filter(row => {
                   const name = String(row[1] || '').toLowerCase();
                   const tpin = String(row[3] || '').toLowerCase();
@@ -2040,6 +2076,13 @@ export default function App() {
                   
                   const isFlagged = rmNum >= 4 || (remark.length > 0 && rmNum > 0);
                   if (!isFlagged) return false;
+
+                  if (hasSearchedRows) {
+                    const rowSl = String(row[0] || '').trim();
+                    if (!activeFoundSls.includes(rowSl)) {
+                      return false;
+                    }
+                  }
                   
                   return !query || name.includes(query) || tpin.includes(query) || remark.includes(query);
                 });
