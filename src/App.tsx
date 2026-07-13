@@ -504,6 +504,57 @@ export default function App() {
     }, 0);
   }, [rows, statsSummary.flagged]);
 
+  // Dynamic success rate based on active search inputs in table rows
+  const activeSuccessRate = React.useMemo(() => {
+    const hasSearchedRows = rows.some(r => r.inputValue.trim() !== '');
+    if (!hasSearchedRows) {
+      return statsSummary.passRate;
+    }
+
+    let totalScored = 0;
+    let totalPassed = 0;
+    const curThresholds = thresholds || THRESHOLDS;
+    const subjects = ['english', 'bangla', 'physics', 'chemistry', 'math', 'biology', 'ict'] as const;
+    const thresholdVals = [
+      curThresholds.english || THRESHOLDS.english,
+      curThresholds.bangla || THRESHOLDS.bangla,
+      curThresholds.physics || THRESHOLDS.physics,
+      curThresholds.chemistry || THRESHOLDS.chemistry,
+      curThresholds.math || THRESHOLDS.math,
+      curThresholds.biology || THRESHOLDS.biology,
+      curThresholds.ict || THRESHOLDS.ict
+    ];
+
+    rows.forEach(row => {
+      if (row.status === 'found' && row.data) {
+        const examiner = row.data;
+        subjects.forEach((sub, s) => {
+          const stat = examiner[sub];
+          const rawScore = String(stat?.score || '').trim();
+          if (rawScore !== '' && rawScore !== '—') {
+            totalScored++;
+            let scoreNum = 0;
+            if (rawScore.includes('/')) {
+              const parts = rawScore.split('/');
+              const achieved = parseFloat(parts[0]);
+              const outOf = parseFloat(parts[1]);
+              if (outOf > 0) {
+                scoreNum = Math.round((achieved / outOf) * 100);
+              }
+            } else {
+              scoreNum = parseFloat(rawScore);
+            }
+            if (scoreNum >= thresholdVals[s]) {
+              totalPassed++;
+            }
+          }
+        });
+      }
+    });
+
+    return totalScored > 0 ? Math.round((totalPassed / totalScored) * 100) : 0;
+  }, [rows, thresholds, statsSummary.passRate]);
+
   const selectSuggestion = (rowId: string, sug: { name: string; tpin: string; mobile: string }) => {
     setRows(prev => prev.map(r => r.id === rowId ? { ...r, inputValue: sug.tpin, status: 'idle', data: null } : r));
     setFocusedRowId(null);
@@ -1330,9 +1381,11 @@ export default function App() {
               <div className="space-y-1 relative z-10">
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Success Rate</span>
                 <span className="text-3xl font-black text-slate-900 leading-tight">
-                  {statsSummary.passRate}%
+                  {activeSuccessRate}%
                 </span>
-                <span className="text-xs text-slate-500 font-medium">Average passing examiners</span>
+                <span className="text-xs text-slate-500 font-medium">
+                  {rows.some(r => r.inputValue.trim() !== '') ? "Success rate of searched examiners" : "Average passing examiners"}
+                </span>
               </div>
               <div className="bg-emerald-50 p-3.5 rounded-xl text-emerald-600 relative z-10 group-hover:bg-emerald-600 group-hover:text-white transition-colors duration-300">
                 <TrendingUp className="w-6 h-6" />
