@@ -555,6 +555,29 @@ export default function App() {
     return totalScored > 0 ? Math.round((totalPassed / totalScored) * 100) : 0;
   }, [rows, thresholds, statsSummary.passRate]);
 
+  // Dynamic primary batches based on active search inputs in table rows
+  const activeBatches = React.useMemo(() => {
+    const hasSearchedRows = rows.some(r => r.inputValue.trim() !== '');
+    if (!hasSearchedRows) {
+      return statsSummary.batches;
+    }
+
+    const batchMap: Record<string, number> = {};
+    rows.forEach(row => {
+      if (row.status === 'found' && row.data) {
+        const batch = String(row.data.batch || '').trim();
+        if (batch) {
+          batchMap[batch] = (batchMap[batch] || 0) + 1;
+        }
+      }
+    });
+
+    return Object.entries(batchMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([name, count]) => ({ name, count }));
+  }, [rows, statsSummary.batches]);
+
   const selectSuggestion = (rowId: string, sug: { name: string; tpin: string; mobile: string }) => {
     setRows(prev => prev.map(r => r.id === rowId ? { ...r, inputValue: sug.tpin, status: 'idle', data: null } : r));
     setFocusedRowId(null);
@@ -1420,11 +1443,11 @@ export default function App() {
             <div className="bg-white border border-slate-200/80 p-5 rounded-2xl shadow-sm flex flex-col justify-between group hover:border-indigo-300 transition-all duration-300 relative overflow-hidden">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Primary Batches</span>
-                {statsSummary.batches.length > 0 && (
+                {activeBatches.length > 0 && (
                   <button
                     type="button"
                     onClick={() => {
-                      setSelectedBatchForExplorer(statsSummary.batches[0].name);
+                      setSelectedBatchForExplorer(activeBatches[0].name);
                       setBatchSearchQuery('');
                     }}
                     className="text-[9px] text-indigo-600 font-black bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-0.5 rounded-full animate-pulse transition-all cursor-pointer active:scale-95 z-20 relative"
@@ -1435,8 +1458,8 @@ export default function App() {
                 )}
               </div>
               <div className="flex flex-wrap gap-1.5 z-10 relative">
-                {statsSummary.batches.length > 0 ? (
-                  statsSummary.batches.map(b => (
+                {activeBatches.length > 0 ? (
+                  activeBatches.map(b => (
                     <button 
                       key={b.name} 
                       type="button"
@@ -1451,7 +1474,9 @@ export default function App() {
                     </button>
                   ))
                 ) : (
-                  <span className="text-xs text-slate-400">Sync database to load</span>
+                  <span className="text-xs text-slate-400">
+                    {rows.some(r => r.inputValue.trim() !== '') ? "No batches for searched items" : "Sync database to load"}
+                  </span>
                 )}
               </div>
             </div>
