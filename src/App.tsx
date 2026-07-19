@@ -1731,6 +1731,10 @@ export default function App() {
             </div>
           )}
         </div>
+        
+        <div className="mt-6 mb-4 text-center text-sm font-medium text-slate-500">
+          Copyright @ Exam Scripts Department. All rights reserved. 2026
+        </div>
       </main>
 
       {isColModalOpen && (
