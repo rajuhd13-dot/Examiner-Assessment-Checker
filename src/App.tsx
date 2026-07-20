@@ -388,6 +388,7 @@ export default function App() {
   });
 
   const [selectedExaminer, setSelectedExaminer] = useState<Examiner | null>(null);
+  const [activeRowId, setActiveRowId] = useState<string | null>(null);
 
   // --- Enhanced features and premium styling states ---
   const [focusedRowId, setFocusedRowId] = useState<string | null>(null);
@@ -1303,8 +1304,8 @@ export default function App() {
               <LayoutGrid className="w-3 h-3 opacity-70" />
               {isSyncing ? 'Syncing...' : (connectionStatus === 'connected' ? (
                 <>
-                  <span className="hidden xl:inline">{isWorkingHours() ? 'Instant Mode Active' : 'Ultra Search Active'}</span>
-                  <span className="inline xl:hidden">{isWorkingHours() ? 'Instant Mode' : 'Ultra Search'}</span>
+                  <span className="hidden xl:inline">{isWorkingHours() ? 'Live System' : 'Ultra Search Active'}</span>
+                  <span className="inline xl:hidden">{isWorkingHours() ? 'Live System' : 'Ultra Search'}</span>
                 </>
               ) : 
                connectionStatus === 'connecting' ? 'Connecting...' : 
@@ -1316,8 +1317,8 @@ export default function App() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
                 </span>
-                <span className="hidden xl:inline">Auto Live Sync: Synced {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                <span className="inline xl:hidden">Synced {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="hidden xl:inline">Auto Live Sync: {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="inline xl:hidden">{new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               </div>
             )}
           </div>
@@ -1596,11 +1597,15 @@ export default function App() {
               <tbody className="divide-y divide-slate-100">
                 {rows.map((row, index) => {
                   const isEven = index % 2 === 0;
+                  const isActive = row.id === activeRowId || (selectedExaminer && row.data && row.data.tpin === selectedExaminer.tpin);
                   
                   let rowBg = '';
                   let hoverBg = '';
                   
-                  if (row.status === 'found') {
+                  if (isActive) {
+                    rowBg = 'bg-indigo-50/95 text-indigo-950 font-medium';
+                    hoverBg = 'group-hover:bg-indigo-100/95';
+                  } else if (row.status === 'found') {
                     rowBg = isEven ? 'bg-[#f4fbf7]' : 'bg-[#e7f7ed]';
                     hoverBg = isEven ? 'group-hover:bg-[#e7f7ed]' : 'group-hover:bg-[#dcfce7]';
                   } else if (row.status === 'error') {
@@ -1612,8 +1617,12 @@ export default function App() {
                   }
 
                   return (
-                  <tr key={row.id} className={`group transition-colors border-b border-slate-200 ${rowBg}`}>
-                    <td className={`px-3 py-1 sticky left-0 z-10 border-r border-slate-200 min-w-[200px] transition-colors ${rowBg} ${hoverBg}`}>
+                  <tr 
+                    key={row.id} 
+                    onClick={() => setActiveRowId(row.id)}
+                    className={`group transition-colors border-b border-slate-200 cursor-pointer ${isActive ? 'shadow-sm' : ''} ${rowBg}`}
+                  >
+                    <td className={`px-3 py-1 sticky left-0 z-10 border-r border-slate-200 min-w-[200px] transition-colors ${rowBg} ${hoverBg} ${isActive ? 'border-l-4 border-l-indigo-600 pl-2' : 'pl-3'}`}>
                       <div className="relative flex items-center gap-2">
                         <div className="relative flex-1">
                           <input 
@@ -1622,12 +1631,14 @@ export default function App() {
                              onChange={(e) => handleRowInput(row.id, e.target.value)}
                              onKeyDown={(e) => handleRowKeyDown(e, row)}
                              onPaste={(e) => handlePaste(e, row.id)}
+                             onFocus={() => setActiveRowId(row.id)}
                              placeholder="TPIN or Mobile"
                              className={`w-full text-[13px] rounded px-3 py-1 pr-8 focus:outline-none transition-all font-medium border
                                ${row.status === 'idle' ? 'bg-white border-slate-300 text-slate-800 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400' : ''}
                                ${row.status === 'loading' ? 'bg-amber-50 border-amber-400 text-amber-900 animate-pulse' : ''}
                                ${row.status === 'found' ? 'bg-white border-[#22c55e] text-slate-800 shadow-[0_0_2px_rgba(34,197,94,0.3)] focus:border-[#22c55e] focus:ring-1 focus:ring-[#22c55e]' : ''}
                                ${row.status === 'not-found' ? 'bg-white border-rose-300 text-rose-800 transition-none' : ''}
+                               ${isActive ? 'ring-2 ring-indigo-500/20 border-indigo-400 bg-white' : ''}
                              `}
                           />
                           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -1671,7 +1682,7 @@ export default function App() {
                            cellContent = getScoreDisplay(val as SubjectStats);
                         } else {
                            cellContent = (
-                             <div className="flex items-center gap-1.5">
+                             <div className="flex items-center justify-center gap-1.5">
                                <span className={`text-[13px] whitespace-nowrap ${index % 2 === 0 ? 'text-slate-700' : 'text-slate-800'}`}>{val as any}</span>
                                {['mobile', 'alternate', 'nagad'].includes(col.key) && val && (
                                  <>
