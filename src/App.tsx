@@ -256,6 +256,63 @@ const fetchWithFallback = async (targetUrl: string): Promise<Response> => {
   }
 };
 
+const mapStructuredToExaminer = (structuredData: any): Examiner => {
+  const quick = structuredData.quick || {};
+  const personal = structuredData.personal || {};
+  const remark = structuredData.remark || { count: 0, show: false, body: '', byLine: '', dateLine: '' };
+  
+  const getSubjectStats = (subName: string): SubjectStats => {
+    const assessments = structuredData.assessments || [];
+    const found = assessments.find((a: any) => a.subject && a.subject.toLowerCase().startsWith(subName.toLowerCase()));
+    if (found) {
+      return {
+        score: found.percent || '',
+        allowed: found.status === 'Allow'
+      };
+    }
+    return { score: '', allowed: false };
+  };
+
+  return {
+    sl: personal.hscRoll || '',
+    name: quick.nickName || quick.fullName || '',
+    tpin: quick.tpin || '',
+    inst: quick.institute || '',
+    dept: quick.department || '',
+    batch: quick.hscBatch || '',
+    rm: quick.rm || '',
+    mobile: quick.mobile1 || '',
+    alternate: quick.mobile2 || '',
+    nagad: quick.nagadNumber || '',
+    campus: quick.physicalCampus || '',
+    training: quick.trainingReport || '',
+    trainingDate: quick.trainingDate || '',
+    remarkedBy: remark.byLine || '',
+    hscGpa: quick.hscGpa || '',
+    homeDistrict: personal.homeDistrict || '',
+    email: personal.email || '',
+    hscBoard: personal.hscBoard || '',
+    subjectsChoice: personal.subjectsChoice || '',
+    runningProgram: personal.runningProgram || '',
+    
+    english: getSubjectStats('English'),
+    bangla: getSubjectStats('Bangla'),
+    physics: getSubjectStats('Physics'),
+    chemistry: getSubjectStats('Chemistry'),
+    math: getSubjectStats('Math'),
+    biology: getSubjectStats('Biology'),
+    ict: getSubjectStats('ICT'),
+    
+    remark: {
+      count: remark.count || 0,
+      show: remark.show || false,
+      body: remark.body || '',
+      byLine: remark.byLine || '',
+      dateLine: remark.dateLine || ''
+    }
+  };
+};
+
 const lookupExaminer = async (query: string): Promise<{ success: boolean; found: boolean; data?: Examiner; error?: string }> => {
   const scriptBaseUrl = getScriptUrl();
   
@@ -263,16 +320,22 @@ const lookupExaminer = async (query: string): Promise<{ success: boolean; found:
   if (typeof google !== 'undefined' && google.script && google.script.run) {
     return new Promise((resolve) => {
       google.script.run
-        .withSuccessHandler((res: any) => resolve(res))
+        .withSuccessHandler((res: any) => {
+          if (res && res.ok && res.data) {
+            resolve({ success: true, found: true, data: mapStructuredToExaminer(res.data) });
+          } else {
+            resolve({ success: false, found: false, error: res?.message || "Not found" });
+          }
+        })
         .withFailureHandler((err: any) => resolve({ success: false, found: false, error: err.message || String(err) }))
-        .lookupExaminerByTPin(query);
+        .searchExaminer(query);
     });
   }
 
   // If running externally (React Dev Server or API call)
   try {
     const separator = scriptBaseUrl.includes('?') ? '&' : '?';
-    const url = `${scriptBaseUrl}${separator}action=lookup&query=${encodeURIComponent(query)}&_t=${Date.now()}`;
+    const url = `${scriptBaseUrl}${separator}q=${encodeURIComponent(query)}&_t=${Date.now()}`;
     const response = await fetchWithFallback(url);
 
     if (!response.ok) {
@@ -280,7 +343,11 @@ const lookupExaminer = async (query: string): Promise<{ success: boolean; found:
     }
 
     const result = await response.json();
-    return result;
+    if (result && result.ok && result.data) {
+      return { success: true, found: true, data: mapStructuredToExaminer(result.data) };
+    } else {
+      return { success: false, found: false, error: result.message || "Examiner not found" };
+    }
   } catch (error: any) {
     console.error("API Fetch Error:", error);
     let errorMessage = error.message || "Failed to connect to API";
@@ -1744,7 +1811,7 @@ export default function App() {
         </div>
         
         <div className="mt-6 mb-4 text-center text-sm font-medium text-slate-500">
-          Copyright @ Exam Scripts Department. All rights reserved. 2026
+          Copyright © Exam Scripts Department. All rights reserved. 2026
         </div>
       </main>
 
