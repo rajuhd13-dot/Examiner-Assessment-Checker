@@ -42,25 +42,54 @@ const ALLOW = {
 };
 
 // =========================================================
+//  RESPONSE WRAPPER (JSONP FOR 100% REAL-TIME & INSTANT SPEED)
+// =========================================================
+
+function sendResponse(e, result) {
+  const cb = e && e.parameter && (e.parameter.callback || e.parameter.prefix);
+  if (cb) {
+    const cleanCb = String(cb).replace(/[^a-zA-Z0-9_]/g, '');
+    return ContentService.createTextOutput(cleanCb + '(' + JSON.stringify(result) + ')')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// =========================================================
 //  CORE LOGIC (Optimized for Speed)
 // =========================================================
 
 function doGet(e) {
   const action = (e && e.parameter) ? e.parameter.action : null;
-  const query  = (e && e.parameter) ? e.parameter.query : '';
+  const query  = (e && e.parameter) ? (e.parameter.query || e.parameter.q) : '';
   
-  let result = { success: false, error: 'No action specified' };
+  let result = { success: false, ok: false, error: 'No action specified' };
 
-  if (action === 'lookup') {
+  if (action === 'checkUpdate' || action === 'version' || action === 'status') {
+    try {
+      const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+      const sheet = ss.getSheetByName(SHEET_NAME);
+      const lastRow = sheet ? sheet.getLastRow() : 0;
+      result = {
+        success: true,
+        ok: true,
+        lastRow: lastRow,
+        rowCount: Math.max(0, lastRow - 1),
+        timestamp: Date.now()
+      };
+    } catch (err) {
+      result = { success: false, ok: false, error: err.message };
+    }
+  } else if (action === 'lookup' || query) {
     result = lookupByQuery(query);
-  } else if (action === 'filterOptions' || action === 'sync') {
+  } else if (action === 'filterOptions' || action === 'sync' || action === 'getAll') {
     result = getAllDataForSync();
   } else if (action === 'ping') {
-    result = { success: true, pong: true, time: new Date().toISOString() };
+    result = { success: true, ok: true, pong: true, time: new Date().toISOString() };
   }
 
-  return ContentService.createTextOutput(JSON.stringify(result))
-    .setMimeType(ContentService.MimeType.JSON);
+  return sendResponse(e, result);
 }
 
 function doPost(e) {

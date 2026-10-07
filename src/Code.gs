@@ -149,16 +149,49 @@ function getSheet() {
 }
 
 // ------------------------------------------------------------------------------------
+// RESPONSE WRAPPER WITH JSONP (LIGHTNING FAST BROWSER CONNECTION)
+// ------------------------------------------------------------------------------------
+function sendResponse_(e, data) {
+  var cb = e && e.parameter && (e.parameter.callback || e.parameter.prefix);
+  if (cb) {
+    var safeCb = String(cb).replace(/[^a-zA-Z0-9_]/g, '');
+    return ContentService.createTextOutput(safeCb + '(' + JSON.stringify(data) + ')')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ------------------------------------------------------------------------------------
 // GET REQUESTS ROUTER (GET ENTRANCES)
 // ------------------------------------------------------------------------------------
 function doGet(e) {
   try {
-    if (e && e.parameter && e.parameter.action === 'debug') {
+    var action = (e && e.parameter && e.parameter.action) ? e.parameter.action : '';
+    
+    if (action === 'ping') {
+      return sendResponse_(e, { ok: true, success: true, pong: true, time: new Date().toISOString() });
+    }
+
+    if (action === 'checkUpdate' || action === 'version' || action === 'status') {
+      var sheet = getSheet();
+      var lastRow = sheet.getLastRow();
+      return sendResponse_(e, {
+        ok: true,
+        success: true,
+        lastRow: lastRow,
+        rowCount: Math.max(0, lastRow - (CONFIG.DATA_START_ROW - 1)),
+        timestamp: Date.now()
+      });
+    }
+
+    if (action === 'debug') {
       var sheet = getSheet();
       var ss = sheet.getParent();
       var sheetNames = ss.getSheets().map(function(s) { return s.getName(); });
-      return ContentService.createTextOutput(JSON.stringify({
+      return sendResponse_(e, {
         ok: true,
+        success: true,
         spreadsheetId: ss.getId(),
         spreadsheetName: ss.getName(),
         sheetName: sheet.getName(),
@@ -166,29 +199,33 @@ function doGet(e) {
         sheetNames: sheetNames,
         configSheetName: CONFIG.SHEET_NAME,
         configSpreadsheetId: CONFIG.SPREADSHEET_ID
-      })).setMimeType(ContentService.MimeType.JSON);
+      });
     }
-    if (e && e.parameter && e.parameter.action === 'sync') {
-      return ContentService.createTextOutput(JSON.stringify(syncAllData()))
-        .setMimeType(ContentService.MimeType.JSON);
+
+    if (action === 'sync' || action === 'filterOptions' || action === 'getAll') {
+      return sendResponse_(e, syncAllData());
     }
+
     if (e && e.parameter && e.parameter.q) {
       var result = searchExaminer(e.parameter.q);
-      return ContentService.createTextOutput(JSON.stringify(result))
-        .setMimeType(ContentService.MimeType.JSON);
+      return sendResponse_(e, result);
     }
-    if (e && e.parameter && e.parameter.action === 'search') {
+
+    if (action === 'lookup' && e && e.parameter && e.parameter.query) {
+      var result = searchExaminer(e.parameter.query);
+      return sendResponse_(e, result);
+    }
+
+    if (action === 'search') {
       var rollQuery = e.parameter.roll;
       var regQuery = e.parameter.reg;
       var res = searchByHscRollReg(rollQuery, regQuery);
-      return ContentService.createTextOutput(JSON.stringify(res))
-                           .setMimeType(ContentService.MimeType.JSON);
+      return sendResponse_(e, res);
     }
-    return ContentService.createTextOutput(JSON.stringify({ ok: false, message: 'No query provided.' }))
-        .setMimeType(ContentService.MimeType.JSON);
+
+    return sendResponse_(e, { ok: false, success: false, message: 'No action or query provided.' });
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ ok: false, message: 'Script Error: ' + err.message }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return sendResponse_(e, { ok: false, success: false, message: 'Script Error: ' + err.message });
   }
 }
 
@@ -199,16 +236,16 @@ function doPost(e) {
   var lock = LockService.getScriptLock();
   try {
     lock.waitLock(30000);
-    var params = JSON.parse(e.postData.contents);
-    if (params.action === 'update') {
-      return ContentService.createTextOutput(JSON.stringify(updateRow(params.tpin, params.updates)))
-        .setMimeType(ContentService.MimeType.JSON);
+    var params = {};
+    if (e && e.postData && e.postData.contents) {
+      try { params = JSON.parse(e.postData.contents); } catch (pe) {}
     }
-    return ContentService.createTextOutput(JSON.stringify({ ok: false, message: 'Invalid action' }))
-      .setMimeType(ContentService.MimeType.JSON);
+    if (params.action === 'update') {
+      return sendResponse_(e, updateRow(params.tpin, params.updates));
+    }
+    return sendResponse_(e, { ok: false, success: false, message: 'Invalid action' });
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ ok: false, message: 'Update Error: ' + err.message }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return sendResponse_(e, { ok: false, success: false, message: 'Update Error: ' + err.message });
   } finally {
     lock.releaseLock();
   }
@@ -580,16 +617,5 @@ function fmtBatch_(v) {
 // AUTOMATIC TRIGGER (ON EDIT) TO CLEAR WEB SERVER CACHE INSTANTLY
 // ------------------------------------------------------------------------------------
 function onEdit(e) {
-  var sheet = e.source.getActiveSheet();
-  if (sheet.getName() === CONFIG.SHEET_NAME) {
-     var tpin = sheet.getRange(e.range.getRow(), COL.TPIN).getValue();
-     
-     // Dynamic Endpoint Ingestion URL
-     var endpointUrl = "https://ais-dev-ddmcf52xgr6udwnqohb35b-192410877328.asia-southeast1.run.app/api/refresh?tpin=" + tpin;
-     
-     UrlFetchApp.fetch(endpointUrl, {
-       'method': 'get',
-       'muteHttpExceptions': true
-     });
-  }
+  // Available hook for sheet edits
 }

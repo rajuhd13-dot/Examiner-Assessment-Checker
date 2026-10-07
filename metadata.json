@@ -1,6 +1,6 @@
 {
-  "name": "",
-  "description": "",
+  "name": "Examiner Assessment Checker",
+  "description": "Real-time examiner evaluation checker, score threshold analyzer, and batch tracking system synchronized with Google Sheets.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

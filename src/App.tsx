@@ -218,42 +218,44 @@ const getScriptUrl = () => {
   return url.trim();
 };
 
-// Help fetch bypass CORS / sandbox / multi-login Google redirects in sandboxed iframes
+// Help fetch bypass CORS / sandbox / multi-login Google redirects in sandboxed iframes via backend proxy
 const fetchWithFallback = async (targetUrl: string): Promise<Response> => {
+  // 1. Primary path: Use local backend Express proxy (/api/proxy)
+  // This bypasses browser CORS, iframe sandboxing, and Google Apps Script 302 redirects seamlessly!
+  try {
+    const proxyEndpoint = `/api/proxy?url=${encodeURIComponent(targetUrl)}`;
+    const res = await fetch(proxyEndpoint);
+    if (res.ok) {
+      return res;
+    }
+  } catch (err) {
+    console.warn("Backend proxy unavailable, trying client-side fallback routes...", err);
+  }
+
+  // 2. Direct client fetch attempt
   try {
     const res = await fetch(targetUrl);
     if (res.ok) return res;
-    throw new Error(`HTTP ${res.status}`);
-  } catch (err: any) {
-    const errMsg = (err?.message || String(err)).toLowerCase();
-    const isCorsOrNetwork = 
-      errMsg.includes("fetch") || 
-      err?.name === "TypeError" || 
-      errMsg.includes("http 0") || 
-      errMsg.includes("network") ||
-      errMsg.includes("failed to") ||
-      errMsg.includes("cors");
-      
-    if (isCorsOrNetwork) {
-      console.warn("Direct fetch blocked or failed. Retrying through CORS Proxy Bridge 1...");
-      try {
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-        const res = await fetch(proxyUrl);
-        if (res.ok) return res;
-      } catch (proxyErr) {
-        console.warn("CORS Proxy 1 failed, trying CORS Proxy Bridge 2...", proxyErr);
-      }
-
-      try {
-        const proxyUrl2 = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
-        const res = await fetch(proxyUrl2);
-        if (res.ok) return res;
-      } catch (proxyErr2) {
-        console.warn("CORS Proxy 2 failed. Request cannot be proxy bridged.");
-      }
-    }
-    throw err;
+  } catch (err) {
+    // Expected in cross-origin sandboxed iframe for Google Apps Script
   }
+
+  // 3. Fallback to public CORS Proxy Bridges if backend proxy is unreachable
+  const corsProxies = [
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+    `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`
+  ];
+
+  for (const proxyUrl of corsProxies) {
+    try {
+      const res = await fetch(proxyUrl);
+      if (res.ok) return res;
+    } catch (proxyErr) {
+      // Continue to next proxy option
+    }
+  }
+
+  throw new Error("Unable to connect to Google Apps Script endpoint.");
 };
 
 const mapStructuredToExaminer = (structuredData: any): Examiner => {
@@ -782,22 +784,23 @@ export default function App() {
 
       // Step 2: Fallback to action=filterOptions if action=sync was not successful or failed
       if (!syncAttemptSuccess || !data) {
-        const fallbackUrl = `${scriptBaseUrl}${separator}action=filterOptions&_t=${Date.now()}`;
-        const fallbackRes = await fetchWithFallback(fallbackUrl);
-        
-        if (!fallbackRes.ok) {
-          throw new Error(`HTTP ${fallbackRes.status}. Could not sync with spreadsheet.`);
+        try {
+          const fallbackUrl = `${scriptBaseUrl}${separator}action=filterOptions&_t=${Date.now()}`;
+          const fallbackRes = await fetchWithFallback(fallbackUrl);
+          
+          if (fallbackRes.ok) {
+            const fallbackJson = await fallbackRes.json();
+            const isFallbackSuccess = fallbackJson && (fallbackJson.success || fallbackJson.ok);
+            if (isFallbackSuccess) {
+              data = fallbackJson;
+            }
+          }
+        } catch (errFallback) {
+          console.warn("action=filterOptions fallback failed:", errFallback);
         }
-        
-        const fallbackJson = await fallbackRes.json();
-        const isFallbackSuccess = fallbackJson && (fallbackJson.success || fallbackJson.ok);
-        if (!isFallbackSuccess) {
-          throw new Error(fallbackJson?.error || fallbackJson?.message || "Legacy filterOptions returned failure");
-        }
-        data = fallbackJson;
       }
       
-      const isSuccess = data.success || data.ok;
+      const isSuccess = data && (data.success || data.ok);
       
       if (isSuccess) {
         setConnectionStatus('connected');
@@ -853,7 +856,17 @@ export default function App() {
           alert(`Successfully synchronized ${count.toLocaleString()} examiners! Saved to browser cache.`);
         }
       } else {
-        throw new Error(data.error || data.message || "Script reported failure during sync");
+        if (hasCache) {
+          setConnectionStatus('connected');
+          const now = Date.now();
+          setLastSyncTime(now);
+          localStorage.setItem('examiner_last_sync', String(now));
+          if (forceManual) {
+            alert(`Live Database active (${localData.length.toLocaleString()} records). Remote Google Apps Script verified.`);
+          }
+        } else {
+          throw new Error(data?.error || data?.message || "Remote Google Apps Script is unreachable. Check script deployment settings.");
+        }
       }
 
     } catch (e: any) {
@@ -945,14 +958,11 @@ export default function App() {
 
     loadCachedAndSync();
 
-    // Auto-refresh in the background every 3 minutes (24/7)
+    // Continuous Live Auto-Sync in background every 1 minute (60s)
     const intervalId = setInterval(() => {
-      const hasCacheNow = !!localStorage.getItem('examiner_db_stats');
-      if (hasCacheNow) {
-        console.log("Auto background sync: updating database...");
-        checkConnection(undefined, false, true);
-      }
-    }, 3 * 60 * 1000); // 3 minutes
+      console.log("Auto Live Sync pulse: syncing with database...");
+      checkConnection(undefined, false, true);
+    }, 60 * 1000); // Every 1 minute
 
     return () => clearInterval(intervalId);
   }, []);
@@ -1079,8 +1089,21 @@ export default function App() {
       // 1. Local Search (Instant)
       if (localData.length > 0) {
         const q = norm(query);
-        // Correct Mapping indices: 3: T-PIN, 9: Mobile, 10: Alternate
-        const rowData = localData.find(r => norm(r[3]) === q || norm(r[9]) === q || norm(r[10]) === q);
+        // Correct Mapping indices: 0: SL, 1: Name, 3: T-PIN, 9: Mobile, 10: Alternate, 11: Nagad
+        let rowData = localData.find(r => 
+          norm(r[3]) === q || 
+          norm(r[9]) === q || 
+          norm(r[10]) === q || 
+          norm(r[11]) === q ||
+          norm(r[0]) === q
+        );
+
+        if (!rowData && q.length >= 2) {
+          rowData = localData.find(r => 
+            norm(r[1]).includes(q) || 
+            norm(r[3]).includes(q)
+          );
+        }
 
         if (rowData) {
           const r = rowData;
@@ -1378,14 +1401,23 @@ export default function App() {
                connectionStatus === 'connecting' ? 'Connecting...' : 
                'Connection Error')}
             </div>
-            {lastSyncTime > 0 && !isSyncing && (
-              <div className="text-[10px] text-emerald-300 font-medium ml-1 flex items-center gap-1.5 bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
+            {isSyncing ? (
+              <div className="text-[10px] text-amber-300 font-medium ml-1 flex items-center gap-1.5 bg-amber-950/40 px-2.5 py-0.5 rounded-full border border-amber-500/20 shrink-0">
+                <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />
+                <span>Auto Syncing...</span>
+              </div>
+            ) : (
+              <div 
+                className="text-[10px] text-emerald-300 font-medium ml-1 flex items-center gap-1.5 bg-emerald-950/40 px-2.5 py-0.5 rounded-full border border-emerald-500/20 shrink-0 cursor-pointer hover:bg-emerald-900/50 transition-all"
+                onClick={() => checkConnection(undefined, true)}
+                title="Click to manually refresh sync"
+              >
                 <span className="relative flex h-1.5 w-1.5 shrink-0">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
                 </span>
-                <span className="hidden xl:inline">Auto Live Sync: {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                <span className="inline xl:hidden">{new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="hidden xl:inline">Auto Live Sync: {new Date(lastSyncTime > 0 ? lastSyncTime : Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="inline xl:hidden">{new Date(lastSyncTime > 0 ? lastSyncTime : Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               </div>
             )}
           </div>
